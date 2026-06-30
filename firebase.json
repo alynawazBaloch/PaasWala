@@ -1,0 +1,12 @@
+{
+  "firestore": {
+    "rules": "src/services/firestoreRules.txt",
+    "indexes": "src/services/firestoreIndexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": {
+    "source": "functions"
+  }
+}

@@ -5,21 +5,54 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
+    "scheme": "paaswala",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.paaswala.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "PaasWala needs your location to show neighborhood content near you."
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0A0F0A",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundImage": "./assets/android-icon-background.png"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.paaswala.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "$GOOGLE_MAPS_API_KEY"
+        }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "RECORD_AUDIO",
+        "CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ],
+    "extra": {
+      "firebaseApiKey": "$FIREBASE_API_KEY",
+      "firebaseAuthDomain": "$FIREBASE_AUTH_DOMAIN",
+      "firebaseProjectId": "$FIREBASE_PROJECT_ID",
+      "firebaseStorageBucket": "$FIREBASE_STORAGE_BUCKET",
+      "firebaseMessagingSenderId": "$FIREBASE_MESSAGING_SENDER_ID",
+      "firebaseAppId": "$FIREBASE_APP_ID",
+      "googleMapsApiKey": "$GOOGLE_MAPS_API_KEY",
+      "brevoApiKey": "$BREVO_API_KEY",
+      "brevoApiKeyExpoPublic": "$EXPO_PUBLIC_BREVO_API_KEY",
+      "eas": {
+        "projectId": "e12c748b-9391-46b5-9ef5-87d689c0315d"
+      }
+    },
+    "owner": "alynawazz"
   }
 }
