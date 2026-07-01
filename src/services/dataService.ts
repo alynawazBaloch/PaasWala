@@ -473,23 +473,25 @@ export async function getUsers(): Promise<UserData[]> {
   try {
     const snapshot = await getDocs(collection(db, 'users'));
     if (!snapshot.empty) {
-      const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserData));
+      const users = snapshot.docs.map((d) => ({ uid: d.id, ...d.data() } as unknown as UserData));
       await setAll(STORAGE_KEYS.USERS, users).catch(() => {});
       return users;
     }
   } catch {}
-  return getAll<UserData>(STORAGE_KEYS.USERS);
+  const all = await getAll<{ id: string }>(STORAGE_KEYS.USERS);
+  return all.map((u) => ({ uid: u.id, ...u } as unknown as UserData));
 }
 
 export async function getUserById(id: string): Promise<UserData | null> {
   try {
     const snapshot = await getDoc(doc(db, 'users', id));
     if (snapshot.exists()) {
-      const user = { id: snapshot.id, ...snapshot.data() } as UserData;
+      const user = { uid: snapshot.id, ...snapshot.data() } as unknown as UserData;
       return user;
     }
   } catch {}
-  return getById<UserData>(STORAGE_KEYS.USERS, id) ?? null;
+  const cached = await getById<{ id: string }>(STORAGE_KEYS.USERS, id);
+  return cached ? ({ uid: cached.id, ...cached } as unknown as UserData) : null;
 }
 
 /* ------------------------------------------------------------------ */

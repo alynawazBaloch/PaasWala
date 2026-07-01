@@ -40,22 +40,26 @@ const ProfileScreen: React.FC = () => {
   const repAnim = useRef(new Animated.Value(0)).current;
   const navigation = useNavigation<any>();
 
-  useEffect(() => { loadStats(); }, []);
+  useEffect(() => { if (user) loadStats(); }, [user]);
   const loadStats = async () => {
     if (!user) return;
-    const allPosts = await getPosts();
-    const myPosts = allPosts.filter(p => p.authorId === user.uid);
-    setUserPosts(myPosts);
-    setPostCount(myPosts.length);
+    try {
+      const allPosts = await getPosts();
+      const myPosts = allPosts.filter(p => p.authorId === user.uid);
+      setUserPosts(myPosts);
+      setPostCount(myPosts.length);
 
-    const allUsers = await getUsers();
-    setNeighborCount(allUsers.filter(u =>
-      u.neighborhoodName && user.neighborhoodName &&
-      u.neighborhoodName === user.neighborhoodName
-    ).length);
+      const allUsers = await getUsers();
+      setNeighborCount(allUsers.filter(u =>
+        u.neighborhoodName && user.neighborhoodName &&
+        u.neighborhoodName === user.neighborhoodName
+      ).length);
 
-    const allEvents = await getEvents();
-    setEventCount(allEvents.length);
+      const allEvents = await getEvents();
+      setEventCount(allEvents.length);
+    } catch (err) {
+      console.warn('[Profile] loadStats error:', err);
+    }
   };
 
   useEffect(() => {

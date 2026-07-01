@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { Marker, Region } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +27,7 @@ import AvatarBadge from '../../components/shared/AvatarBadge';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { DARK_MAP_STYLE } from '../../services/maps';
+import { uploadImage } from '../../services/upload';
 
 interface EditProfileScreenProps {
   navigation: any;
@@ -72,13 +73,18 @@ const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation }) => 
         quality: 0.8,
       });
       if (!result.canceled && result.assets[0]) {
-        await updateUser({ avatar: result.assets[0].uri });
+        // Upload to Firebase Storage so the avatar persists across devices
+        const avatarUrl = await uploadImage(
+          result.assets[0].uri,
+          `avatars/${user?.uid || 'unknown'}/${Date.now()}.jpg`
+        );
+        await updateUser({ avatar: avatarUrl });
       }
     } catch (err) {
       console.error('[EditProfile] Image picker error:', err);
-      Alert.alert('Error', 'Failed to select image. Please try again.');
+      Alert.alert('Error', 'Failed to upload image. Please try again.');
     }
-  }, [updateUser]);
+  }, [updateUser, user?.uid]);
 
   const handleSave = useCallback(async () => {
     if (!name.trim()) {
@@ -366,7 +372,6 @@ const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation }) => 
               </TouchableOpacity>
             </View>
             <MapView
-              provider={PROVIDER_GOOGLE}
               style={StyleSheet.absoluteFillObject}
               region={mapRegion}
               onRegionChangeComplete={setMapRegion}

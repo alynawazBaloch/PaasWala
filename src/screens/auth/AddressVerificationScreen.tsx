@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { BlurView } from 'expo-blur';
-import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import Colors from '../../utils/colors';
 import { useAuth } from '../../context/AuthContext';
@@ -201,7 +201,6 @@ const AddressVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }
           {/* Interactive Map Preview */}
           <View style={styles.mapPreview}>
             <MapView
-              provider={PROVIDER_GOOGLE}
               style={StyleSheet.absoluteFill}
               region={mapRegion}
               onRegionChangeComplete={setMapRegion}

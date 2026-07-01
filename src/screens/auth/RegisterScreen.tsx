@@ -10,13 +10,14 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { Marker, Region } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import Colors from '../../utils/colors';
 import GlassCard from '../../components/glass/GlassCard';
+import { DARK_MAP_STYLE } from '../../services/maps';
 import GlowButton from '../../components/glass/GlowButton';
 import GlowInput from '../../components/glass/GlowInput';
 import { isValidEmail, getPasswordStrength } from '../../utils/validators';
@@ -434,11 +435,10 @@ const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               {/* Google Maps Preview */}
               <View style={styles.mapPreview}>
                 <MapView
-                  provider={PROVIDER_GOOGLE}
                   style={StyleSheet.absoluteFill}
                   region={mapRegion}
                   onRegionChangeComplete={setMapRegion}
-                  customMapStyle={darkMapStyle}
+                  customMapStyle={DARK_MAP_STYLE}
                   scrollEnabled={false}
                   zoomEnabled={false}
                 >
@@ -565,19 +565,6 @@ const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     </SafeAreaView>
   );
 };
-
-// Dark map style matching the app theme
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#0A0F0A' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#A8B8A8' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0A0F0A' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#1A2A1A' }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#111811' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1A3A1A' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2D6A4F' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0A1A0A' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#111811' }] },
-];
 
 const styles = StyleSheet.create({
   container: {

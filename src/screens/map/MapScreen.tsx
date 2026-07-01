@@ -9,8 +9,9 @@ import {
   Dimensions,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE, Region } from 'react-native-maps';
+import MapView, { Marker, Region } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import GlassCard from '../../components/glass/GlassCard';
 import GlowButton from '../../components/glass/GlowButton';
 import CategoryChip from '../../components/shared/CategoryChip';
 import Colors from '../../utils/colors';
+import { DARK_MAP_STYLE } from '../../services/maps';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -127,11 +129,11 @@ const MapScreen: React.FC = () => {
         {locationPermission ? (
           <MapView
             ref={mapRef}
-            provider={PROVIDER_GOOGLE}
             style={styles.map}
             region={region}
             onRegionChangeComplete={setRegion}
-            customMapStyle={darkMapStyle}
+            customMapStyle={Platform.OS === 'android' ? DARK_MAP_STYLE : undefined}
+            mapType={Platform.OS === 'ios' ? 'mutedStandard' : 'standard'}
             showsUserLocation
             showsMyLocationButton={false}
             showsCompass
@@ -225,27 +227,6 @@ const MapScreen: React.FC = () => {
     </SafeAreaView>
   );
 };
-
-// Dark map style matching the app's #0A0F0A theme
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#0A0F0A' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#A8B8A8' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0A0F0A' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#1A2A1A' }] },
-  { featureType: 'administrative.country', elementType: 'labels.text.fill', stylers: [{ color: '#6B7B6B' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#A8B8A8' }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#111811' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#6B7B6B' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#1A2A1A' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1A3A1A' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#6B7B6B' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2D6A4F' }] },
-  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#52B788' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0A1A0A' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#2D6A4F' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#111811' }] },
-  { featureType: 'transit', elementType: 'labels.text.fill', stylers: [{ color: '#6B7B6B' }] },
-];
 
 const styles = StyleSheet.create({
   container: {

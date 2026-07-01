@@ -14,16 +14,17 @@ import {
   Animated as RNAnimated,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GlassCard from '../../components/glass/GlassCard';
 import AvatarBadge from '../../components/shared/AvatarBadge';
-import { Post } from '../../hooks/useFeed';
 import Colors from '../../utils/colors';
 import { ROLE_BADGES } from '../../utils/constants';
 import { useAuth } from '../../context/AuthContext';
-import { getComments, addComment as dsAddComment } from '../../services/dataService';
+import { getComments, getPost, addComment as dsAddComment } from '../../services/dataService';
+import type { Post as FeedPost } from '../../services/dataService';
 import type { Comment as DSComment } from '../../services/dataService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -53,22 +54,43 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
   const [commentText, setCommentText] = useState('');
   const { user } = useAuth();
   const [comments, setComments] = useState<DSComment[]>([]);
-
-  useEffect(() => {
-    loadComments();
-  }, []);
-
-  const loadComments = async () => {
-    const postId = route?.params?.postId || 'seed_post_1';
-    const loaded = await getComments(postId);
-    setComments(loaded);
-  };
+  const [post, setPost] = useState<FeedPost | null>(null);
+  const [postLoading, setPostLoading] = useState(true);
   const [isLiked, setIsLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(24);
+  const [likeCount, setLikeCount] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sendButtonScale = useRef(new RNAnimated.Value(1)).current;
+
+  // Load the real post
+  useEffect(() => {
+    const load = async () => {
+      const id = route?.params?.postId || '';
+      if (!id) {
+        setPostLoading(false);
+        return;
+      }
+      const found = await getPost(id);
+      if (found) {
+        setPost(found);
+        setLikeCount(found.likesCount ?? 0);
+      }
+      setPostLoading(false);
+    };
+    load();
+  }, [route?.params?.postId]);
+
+  // Load real comments
+  useEffect(() => {
+    const loadComments = async () => {
+      const id = route?.params?.postId || '';
+      if (!id) return;
+      const loaded = await getComments(id);
+      setComments(loaded);
+    };
+    loadComments();
+  }, []);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
@@ -83,40 +105,17 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
     };
   }, []);
 
-  // Mock post based on passed postId
-  const post: Post = {
-    id: postId || '1',
-    authorId: '1',
-    authorName: 'Aisha Khan',
-    authorAvatar: '',
-    authorRole: 'resident',
-    verified: true,
-    street: 'Street 5',
-    content:
-      'Assalam-o-Alaikum neighbors! Just wanted to share that the new bakery on Main Street has amazing fresh naan! Highly recommend. They also have a variety of kebabs and freshly baked bread. The owner told me they source their flour locally which makes a huge difference in taste. Definitely worth checking out this weekend!',
-    media: [],
-    category: 'recommendation',
-    likesCount: 24,
-    commentsCount: 8,
-    userLiked: false,
-    timestamp: Date.now() - 3600000,
-    audience: 'public',
-  };
-
-  const roleKey = post.authorRole as keyof typeof ROLE_BADGES;
-  const roleBadge = ROLE_BADGES[roleKey] || ROLE_BADGES.resident;
-
   const handleLike = useCallback(() => {
     setIsLiked((prev) => !prev);
     setLikeCount((prev) => (isLiked ? prev - 1 : prev + 1));
   }, [isLiked]);
 
   const handleSendComment = useCallback(() => {
-    if (!commentText.trim()) return;
+    if (!commentText.trim() || !post) return;
 
     const newComment: DSComment = {
       id: 'c_' + Date.now().toString(36),
-      postId: route?.params?.postId || 'seed_post_1',
+      postId: post.id,
       authorId: user?.uid ?? 'unknown',
       authorName: user?.name ?? 'You',
       authorAvatar: user?.avatar ?? '',
@@ -135,7 +134,7 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
     setTimeout(() => {
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, 100);
-  }, [commentText, user]);
+  }, [commentText, user, post]);
 
   const handleCommentLike = useCallback((commentId: string) => {
     setComments((prev) =>
@@ -234,6 +233,37 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
       </GlassCard>
     );
   };
+
+  if (postLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={Colors.accent} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!post) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation?.goBack()}>
+            <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Post</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingWrap}>
+          <Ionicons name="alert-circle-outline" size={48} color={Colors.textMuted} />
+          <Text style={styles.emptyTabText}>Post not found</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const roleKey = post.authorRole as keyof typeof ROLE_BADGES;
+  const roleBadge = ROLE_BADGES[roleKey] || ROLE_BADGES.resident;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -789,6 +819,19 @@ const styles = StyleSheet.create({
   },
 
   // Comment Input
+  // Loading / Error
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  emptyTabText: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    fontFamily: 'Inter',
+  },
+
   commentInputBar: {
     backgroundColor: Colors.secondaryBg,
     borderTopWidth: 1,

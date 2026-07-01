@@ -13,7 +13,11 @@ import {
   updateDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { auth, db } from '../services/firebase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { auth, db, storage } from '../services/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+const CACHED_USER_KEY = '@paaswala_cached_user';
 
 export interface UserData {
   uid: string;
@@ -95,11 +99,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /** Persist user to AsyncStorage so session survives app restart. */
+  const persistUser = async (u: UserData | null) => {
+    try {
+      if (u) {
+        await AsyncStorage.setItem(CACHED_USER_KEY, JSON.stringify(u));
+      } else {
+        await AsyncStorage.removeItem(CACHED_USER_KEY);
+      }
+    } catch {}
+  };
+
   useEffect(() => {
+    let cancelled = false;
+
+    // 1. Immediately restore cached user (instant render, no flash of login)
+    AsyncStorage.getItem(CACHED_USER_KEY).then((cached) => {
+      if (cancelled) return;
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as UserData;
+          setUser(parsed);
+          setLoading(false);
+        } catch {}
+      }
+    }).catch(() => {});
+
+    // 2. Listen for real auth state changes in background
     const unsubscribe = onAuthStateChanged(auth, async (fireUser) => {
+      if (cancelled) return;
       if (fireUser) {
         try {
-          // Fetch or create Firestore profile
           const profileRef = doc(db, 'users', fireUser.uid);
           const snapshot = await getDoc(profileRef);
           let profile: Record<string, any> | undefined;
@@ -107,23 +137,28 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             profile = snapshot.data();
           }
           const userData = buildUserData(fireUser, profile);
-          // Update lastSeen
+          // Update lastSeen (fire-and-forget)
           if (snapshot.exists()) {
             updateDoc(profileRef, { lastSeen: Date.now() }).catch(() => {});
           }
           setUser(userData);
+          persistUser(userData);
         } catch (err) {
           console.error('[Auth] Failed to load profile:', err);
-          // Fallback: build from just the Firebase user
-          setUser(buildUserData(fireUser));
+          // Fallback: keep cached user if we already have one, otherwise build from Firebase
+          setUser((prev) => prev ?? buildUserData(fireUser));
         }
       } else {
         setUser(null);
+        persistUser(null);
       }
       setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -137,6 +172,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     throw new Error('Google Sign-In not yet configured. Use email login instead.');
   };
 
+  /** Upload a local file URI to Firebase Storage, return download URL. */
+  const uploadLocalImage = async (localUri: string, path: string): Promise<string> => {
+    try {
+      const resp = await fetch(localUri);
+      const blob = await resp.blob();
+      const storageRef = ref(storage, path);
+      const snap = await uploadBytes(storageRef, blob);
+      return getDownloadURL(snap.ref);
+    } catch {
+      return localUri; // fallback to local URI if upload fails
+    }
+  };
+
   const register = async (data: Partial<UserData> & { password: string }) => {
     const { password, ...profile } = data;
     const credential = await createUserWithEmailAndPassword(
@@ -145,12 +193,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       password
     );
     const now = Date.now();
+
+    // Upload avatar to Firebase Storage if it's a local URI
+    let avatarUrl = profile.avatar || '';
+    if (avatarUrl && (avatarUrl.startsWith('file://') || avatarUrl.startsWith('data:'))) {
+      avatarUrl = await uploadLocalImage(avatarUrl, `avatars/${credential.user.uid}/profile.jpg`);
+    }
+
     const userData: UserData = {
       uid: credential.user.uid,
       name: profile.name || credential.user.displayName || 'Neighbor',
       email: credential.user.email || profile.email || '',
       phone: profile.phone || '',
-      avatar: profile.avatar || '',
+      avatar: avatarUrl,
       coverPhoto: profile.coverPhoto || '',
       role: 'resident',
       verified: false,
@@ -173,17 +228,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
 
     setUser(userData);
+    persistUser(userData);
   };
 
   const logout = async () => {
     await firebaseSignOut(auth);
     setUser(null);
+    persistUser(null);
   };
 
   const updateUser = async (data: Partial<UserData>) => {
     if (!user) return;
     const updated = { ...user, ...data };
     setUser(updated);
+    persistUser(updated);
     // Persist to Firestore (fire-and-forget — never block UI on slow writes)
     updateDoc(doc(db, 'users', user.uid), {
       ...data,

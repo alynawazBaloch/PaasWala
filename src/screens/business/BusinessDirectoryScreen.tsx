@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GlassCard from '../../components/glass/GlassCard';
 import GlowInput from '../../components/glass/GlowInput';
@@ -200,7 +200,6 @@ const BusinessDirectoryScreen: React.FC = () => {
         <View style={styles.mapViewContainer}>
           <MapView
             style={StyleSheet.absoluteFillObject}
-            provider={PROVIDER_GOOGLE}
             initialRegion={{
               latitude: 31.481,
               longitude: 74.315,
