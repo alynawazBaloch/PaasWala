@@ -386,7 +386,7 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
               <View style={styles.badgeDot} />
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7} onPress={() => navigation?.getParent()?.navigate('Messages')}>
+          <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7} onPress={() => navigation?.navigate('Messages')}>
             <View style={styles.iconBadgeWrapper}>
               <Ionicons name="chatbubbles-outline" size={24} color={Colors.textPrimary} />
               <View style={[styles.badgeDot, styles.badgeCount]}>

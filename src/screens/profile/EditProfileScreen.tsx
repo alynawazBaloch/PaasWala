@@ -80,9 +80,17 @@ const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ navigation }) => 
         );
         await updateUser({ avatar: avatarUrl });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[EditProfile] Image picker error:', err);
-      Alert.alert('Error', 'Failed to upload image. Please try again.');
+      const msg =
+        err?.code === 'storage/unauthorized'
+          ? 'Upload permission denied. Make sure you are logged in and try again.'
+          : err?.code === 'storage/quota'
+            ? 'Storage quota exceeded. Please contact support.'
+            : err?.code === 'storage/retry-limit'
+              ? 'Network error — please check your connection and try again.'
+              : `Could not upload image (${err?.code || 'unknown error'}). Please try again with a smaller image, or contact support.`;
+      Alert.alert('Upload Failed', msg);
     }
   }, [updateUser, user?.uid]);
 
