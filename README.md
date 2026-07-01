@@ -6,7 +6,7 @@
 
 ## 📲 Download
 
-[![Download APK v1.0.0](https://img.shields.io/badge/Download-APK%20v1.0.0-2D6A4F?style=for-the-badge&logo=android)](https://github.com/alynawazBaloch/PaasWala/releases/download/v1.0.0/PaasWala-v1.0.0.apk)
+[![Download APK v1.0.1](https://img.shields.io/badge/Download-APK%20v1.0.1-2D6A4F?style=for-the-badge&logo=android)](https://github.com/alynawazBaloch/PaasWala/releases/download/v1.0.0/PaasWala-v1.0.1.apk)
 
 > **Install instructions:** Download the APK → open it on your Android phone → tap "Install Anyway" if prompted → Done!
 
