@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import {
   View,
@@ -10,7 +10,6 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker } from 'react-native-maps';
@@ -21,12 +20,42 @@ import SpringCard from '../../components/animated/SpringCard';
 import CategoryChip from '../../components/shared/CategoryChip';
 import EmptyState3D from '../../components/shared/EmptyState3D';
 import Colors from '../../utils/colors';
-import { getBusinesses } from '../../services/dataService';
-import type { Business } from '../../services/dataService';
+import { listenBusinesses } from '../../services/dataService';
+import { DARK_MAP_STYLE } from '../../services/maps';
+import type { Business, BusinessHours } from '../../services/dataService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const CATEGORIES = ['All', 'Restaurants', 'Retail', 'Services', 'Healthcare', 'Education', 'Fitness'];
+
+const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function isOpenNow(hours?: BusinessHours[]): boolean {
+  if (!hours || hours.length === 0) return false;
+  const now = new Date();
+  const todayName = DAY_MAP[now.getDay()];
+  const today = hours.find(h => h.day === todayName);
+  if (!today) return false;
+  try {
+    const parseTime = (t: string) => {
+      const [time, mod] = t.split(' ');
+      let [h, m] = time.split(':').map(Number);
+      if (mod === 'PM' && h !== 12) h += 12;
+      if (mod === 'AM' && h === 12) h = 0;
+      return h * 60 + m;
+    };
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const openMin = parseTime(today.open);
+    const closeMin = parseTime(today.close);
+    return nowMin >= openMin && nowMin <= closeMin;
+  } catch {
+    return false;
+  }
+}
+
+const MARKER_PURPLE = '#9B59B6';
+const DEFAULT_LAT = 31.481;
+const DEFAULT_LNG = 74.315;
 
 const renderStars = (rating: number) => {
   const stars = [];
@@ -35,17 +64,11 @@ const renderStars = (rating: number) => {
 
   for (let i = 1; i <= 5; i++) {
     if (i <= fullStars) {
-      stars.push(
-        <Ionicons key={i} name="star" size={14} color={Colors.accent} />
-      );
+      stars.push(<Ionicons key={i} name="star" size={14} color={Colors.accent} />);
     } else if (i === fullStars + 1 && hasHalf) {
-      stars.push(
-        <Ionicons key={i} name="star-half" size={14} color={Colors.accent} />
-      );
+      stars.push(<Ionicons key={i} name="star-half" size={14} color={Colors.accent} />);
     } else {
-      stars.push(
-        <Ionicons key={i} name="star-outline" size={14} color={Colors.textMuted} />
-      );
+      stars.push(<Ionicons key={i} name="star-outline" size={14} color={Colors.textMuted} />);
     }
   }
   return stars;
@@ -59,11 +82,12 @@ const BusinessDirectoryScreen: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [mapView, setMapView] = useState(false);
 
-  useEffect(() => { loadBiz(); }, []);
-  const loadBiz = async () => {
-    const all = await getBusinesses();
-    setBusinesses(all);
-  };
+  useEffect(() => {
+    const unsubscribe = listenBusinesses((data) => {
+      setBusinesses(data);
+    });
+    return unsubscribe;
+  }, []);
 
   const filteredBusinesses = businesses.filter((biz) => {
     const matchesSearch =
@@ -73,81 +97,88 @@ const BusinessDirectoryScreen: React.FC = () => {
     return matchesSearch && matchesCategory;
   });
 
-  const renderBusinessCard = ({ item }: { item: Business }) => (
-    <SpringCard onPress={() => navigation.navigate('BusinessDetail', { business: item })}>
-      <GlassCard style={styles.businessCard}>
-        <View style={styles.businessRow}>
-          {/* Logo */}
-          <View style={styles.logoContainer}>
-            {item.image ? (
-              <Image source={{ uri: item.image }} style={styles.logoImage} />
-            ) : (
-              <View style={styles.logoPlaceholder}>
-                <Ionicons name="storefront" size={24} color={Colors.accent} />
-              </View>
-            )}
-          </View>
+  const getCoordinate = (biz: Business, idx: number) => {
+    if (biz.latitude != null && biz.longitude != null) {
+      return { latitude: biz.latitude, longitude: biz.longitude };
+    }
+    return {
+      latitude: DEFAULT_LAT + idx * 0.0008,
+      longitude: DEFAULT_LNG + idx * 0.0012,
+    };
+  };
 
-          {/* Details */}
-          <View style={styles.businessInfo}>
-            <View style={styles.businessNameRow}>
-              <Text style={styles.businessName} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <View
-                style={[
-                  styles.openBadge,
-                  item.isOpen
-                    ? { backgroundColor: 'rgba(82,183,136,0.15)', borderColor: 'rgba(82,183,136,0.3)' }
-                    : { backgroundColor: 'rgba(255,68,68,0.1)', borderColor: 'rgba(255,68,68,0.2)' },
-                ]}
-              >
+  const renderBusinessCard = ({ item }: { item: Business }) => {
+    const open = isOpenNow(item.hours);
+    return (
+      <SpringCard onPress={() => navigation.navigate('BusinessDetail', { business: item })}>
+        <GlassCard style={styles.businessCard}>
+          <View style={styles.businessRow}>
+            {/* Logo */}
+            <View style={styles.logoContainer}>
+              {item.image ? (
+                <Image source={{ uri: item.image }} style={styles.logoImage} />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Ionicons name="storefront" size={24} color={Colors.accent} />
+                </View>
+              )}
+            </View>
+
+            {/* Details */}
+            <View style={styles.businessInfo}>
+              <View style={styles.businessNameRow}>
+                <Text style={styles.businessName} numberOfLines={1}>
+                  {item.name}
+                </Text>
                 <View
                   style={[
-                    styles.openDot,
-                    { backgroundColor: item.isOpen ? Colors.success : Colors.error },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.openText,
-                    { color: item.isOpen ? Colors.success : Colors.error },
+                    styles.openBadge,
+                    open
+                      ? { backgroundColor: 'rgba(82,183,136,0.15)', borderColor: 'rgba(82,183,136,0.3)' }
+                      : { backgroundColor: 'rgba(255,68,68,0.1)', borderColor: 'rgba(255,68,68,0.2)' },
                   ]}
                 >
-                  {item.isOpen ? 'Open' : 'Closed'}
+                  <View
+                    style={[
+                      styles.openDot,
+                      { backgroundColor: open ? Colors.success : Colors.error },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.openText,
+                      { color: open ? Colors.success : Colors.error },
+                    ]}
+                  >
+                    {open ? 'Open' : 'Closed'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Category Chip */}
+              <View style={styles.categoryRow}>
+                <CategoryChip label={item.category} active color={Colors.primary} />
+              </View>
+
+              {/* Rating */}
+              <View style={styles.ratingRow}>
+                <View style={styles.starsRow}>{renderStars(item.rating)}</View>
+                <Text style={styles.ratingText}>
+                  {item.rating} ({item.reviewCount})
                 </Text>
               </View>
-            </View>
 
-            {/* Category Chip */}
-            <View style={styles.categoryRow}>
-              <CategoryChip
-                label={item.category}
-                active
-                color={Colors.primary}
-              />
-            </View>
-
-            {/* Rating */}
-            <View style={styles.ratingRow}>
-              <View style={styles.starsRow}>
-                {renderStars(item.rating)}
+              {/* Distance */}
+              <View style={styles.distanceRow}>
+                <Ionicons name="location" size={12} color={Colors.textMuted} />
+                <Text style={styles.distanceText}>{item.distance}</Text>
               </View>
-              <Text style={styles.ratingText}>
-                {item.rating} ({item.reviewCount})
-              </Text>
-            </View>
-
-            {/* Distance */}
-            <View style={styles.distanceRow}>
-              <Ionicons name="location" size={12} color={Colors.textMuted} />
-              <Text style={styles.distanceText}>{item.distance}</Text>
             </View>
           </View>
-        </View>
-      </GlassCard>
-    </SpringCard>
-  );
+        </GlassCard>
+      </SpringCard>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -200,29 +231,30 @@ const BusinessDirectoryScreen: React.FC = () => {
         <View style={styles.mapViewContainer}>
           <MapView
             style={StyleSheet.absoluteFillObject}
+            customMapStyle={DARK_MAP_STYLE}
             initialRegion={{
-              latitude: 31.481,
-              longitude: 74.315,
+              latitude: DEFAULT_LAT,
+              longitude: DEFAULT_LNG,
               latitudeDelta: 0.05,
               longitudeDelta: 0.05,
             }}
             showsUserLocation
             showsCompass
           >
-            {filteredBusinesses.map(function(biz, idx) {
-              var lat = 31.480 + (idx * 0.0008);
-              var lng = 74.314 + (idx * 0.0012);
+            {filteredBusinesses.map((biz, idx) => {
+              const coord = getCoordinate(biz, idx);
               return (
                 <Marker
                   key={biz.id}
-                  coordinate={{ latitude: lat, longitude: lng }}
+                  coordinate={coord}
                   title={biz.name}
-                  description={biz.category + ' • ' + biz.distance}
-                  onPress={function() {
-                    Linking.openURL('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(biz.name)).catch(function() {});
-                  }}
-                  pinColor="#52B788"
-                />
+                  description={`${biz.category} • ${biz.distance}`}
+                  onPress={() => navigation.navigate('BusinessDetail', { business: biz })}
+                >
+                  <View style={styles.markerContainer}>
+                    <Ionicons name="storefront" size={18} color="#FFFFFF" />
+                  </View>
+                </Marker>
               );
             })}
           </MapView>
@@ -391,28 +423,18 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  mapPlaceholder: {
-    flex: 1,
-    backgroundColor: Colors.mapDark,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  mapPlaceholderText: {
-    color: Colors.textSecondary,
-    fontSize: 16,
-    fontWeight: '600',
-    fontFamily: 'Inter',
-  },
-  mapPlaceholderSubtext: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontFamily: 'Inter',
+  markerContainer: {
+    backgroundColor: MARKER_PURPLE,
+    borderRadius: 16,
+    padding: 6,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    shadowColor: MARKER_PURPLE,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 5,
   },
 });
 
 export default BusinessDirectoryScreen;
-

@@ -14,6 +14,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState, AppStateStatus } from 'react-native';
 import { auth, db, storage } from '../services/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -37,6 +38,34 @@ export interface UserData {
   createdAt: number;
   lastSeen: number;
   likesPrivacyDefault: 'public' | 'neighborhood' | 'private';
+  // Location fields
+  latitude?: number;
+  longitude?: number;
+  geohash?: string;
+  address?: string;
+  area?: string;
+  city?: string;
+  lastLocationUpdate?: number;
+  // Follow / Friend fields
+  searchableByEmail: boolean;
+  followersCount: number;
+  followingCount: number;
+  friendsCount: number;
+  // Search / privacy
+  nameLowercase?: string;
+  blockedUsers?: string[];
+  // Notification preferences
+  notificationPreferences: {
+    newPosts: boolean;
+    messages: boolean;
+    events: boolean;
+    alerts: boolean;
+  };
+  // Privacy & Reputation
+  whoCanMessage: 'everyone' | 'friends' | 'nobody';
+  postVisibility: 'neighborhood' | 'friends';
+  showLocationOnMap: boolean;
+  reputationTier: 'bronze' | 'silver' | 'gold';
 }
 
 interface AuthContextType {
@@ -92,6 +121,33 @@ function buildUserData(fireUser: FirebaseUser, profile?: Record<string, any>): U
     createdAt: profile?.createdAt || now,
     lastSeen: now,
     likesPrivacyDefault: profile?.likesPrivacyDefault || 'neighborhood',
+    // Location fields
+    latitude: profile?.latitude || undefined,
+    longitude: profile?.longitude || undefined,
+    geohash: profile?.geohash || undefined,
+    address: profile?.address || '',
+    area: profile?.area || '',
+    city: profile?.city || '',
+    lastLocationUpdate: profile?.lastLocationUpdate || undefined,
+    // Follow / Friend fields
+    searchableByEmail: profile?.searchableByEmail ?? true,
+    followersCount: profile?.followersCount ?? 0,
+    followingCount: profile?.followingCount ?? 0,
+    friendsCount: profile?.friendsCount ?? 0,
+    // Search / privacy
+    nameLowercase: profile?.nameLowercase || (profile?.name || fireUser.displayName || '').toLowerCase(),
+    blockedUsers: profile?.blockedUsers || [],
+    // Notification preferences
+    notificationPreferences: profile?.notificationPreferences ?? {
+      newPosts: true,
+      messages: true,
+      events: false,
+      alerts: true,
+    },
+    whoCanMessage: profile?.whoCanMessage || 'everyone',
+    postVisibility: profile?.postVisibility || 'neighborhood',
+    showLocationOnMap: profile?.showLocationOnMap ?? true,
+    reputationTier: profile?.reputationTier || 'bronze',
   };
 }
 
@@ -137,9 +193,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             profile = snapshot.data();
           }
           const userData = buildUserData(fireUser, profile);
-          // Update lastSeen (fire-and-forget)
+          // Update online status + lastSeen (fire-and-forget)
           if (snapshot.exists()) {
-            updateDoc(profileRef, { lastSeen: Date.now() }).catch(() => {});
+            updateDoc(profileRef, { onlineStatus: true, lastSeen: Date.now() }).catch(() => {});
           }
           setUser(userData);
           persistUser(userData);
@@ -160,6 +216,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       unsubscribe();
     };
   }, []);
+
+  // AppState listener: update onlineStatus on foreground/background
+  useEffect(() => {
+    if (!user?.uid) return;
+    const handleAppState = (nextState: AppStateStatus) => {
+      const showOnline = user?.showOnlineStatus !== false;
+      const isActive = nextState === 'active';
+      // If showOnlineStatus is false, always appear offline
+      const onlineStatus = showOnline ? isActive : false;
+      updateDoc(doc(db, 'users', user.uid), {
+        onlineStatus,
+        lastSeen: Date.now(),
+      }).catch(() => {});
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppState);
+    return () => subscription.remove();
+  }, [user?.uid, user?.showOnlineStatus]);
 
   const login = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
@@ -218,11 +292,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       createdAt: now,
       lastSeen: now,
       likesPrivacyDefault: 'neighborhood',
+      // Location from registration
+      latitude: profile.latitude || undefined,
+      longitude: profile.longitude || undefined,
+      geohash: profile.geohash || undefined,
+      address: profile.address || '',
+      area: profile.area || '',
+      city: profile.city || '',
+      lastLocationUpdate: profile.lastLocationUpdate || undefined,
+      // Follow / Friend defaults
+      searchableByEmail: true,
+      followersCount: 0,
+      followingCount: 0,
+      friendsCount: 0,
+      // Notification preferences
+      notificationPreferences: {
+        newPosts: true,
+        messages: true,
+        events: false,
+        alerts: true,
+      },
+      whoCanMessage: 'everyone',
+      postVisibility: 'neighborhood',
+      showLocationOnMap: true,
+      reputationTier: 'bronze',
     };
 
     // Create Firestore profile
     await setDoc(doc(db, 'users', credential.user.uid), {
       ...userData,
+      nameLowercase: (userData.name || '').toLowerCase(),
+      blockedUsers: [],
       createdAt: serverTimestamp(),
       lastSeen: serverTimestamp(),
     });
@@ -239,14 +339,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const updateUser = async (data: Partial<UserData>) => {
     if (!user) return;
-    const updated = { ...user, ...data };
+    const updates: Record<string, any> = { ...data, lastSeen: Date.now() };
+    if (data.name && !data.nameLowercase) {
+      updates.nameLowercase = data.name.toLowerCase();
+    }
+    const updated = { ...user, ...updates };
     setUser(updated);
     persistUser(updated);
     // Persist to Firestore (fire-and-forget — never block UI on slow writes)
-    updateDoc(doc(db, 'users', user.uid), {
-      ...data,
-      lastSeen: Date.now(),
-    }).catch((err) => {
+    updateDoc(doc(db, 'users', user.uid), updates).catch((err) => {
       if (err.code !== 'unavailable') console.error('[Auth] updateUser failed:', err);
     });
   };

@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GlassCard from '../../components/glass/GlassCard';
 import AvatarBadge from '../../components/shared/AvatarBadge';
+import TappableAuthor from '../../components/shared/TappableAuthor';
 import Colors from '../../utils/colors';
 import { ROLE_BADGES } from '../../utils/constants';
 import { useAuth } from '../../context/AuthContext';
@@ -171,7 +172,17 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
 
     return (
       <GlassCard key={comment.id} style={styles.commentCard} noTouch>
-        <View style={styles.commentHeader}>
+        <TouchableOpacity
+          style={styles.commentHeader}
+          onPress={() => {
+            if (comment.authorId === user?.uid) {
+              navigation?.navigate('MainTabs', { screen: 'Profile' });
+            } else {
+              navigation?.navigate('AuthorProfile', { userId: comment.authorId });
+            }
+          }}
+          activeOpacity={0.7}
+        >
           <AvatarBadge
             name={comment.authorName}
             avatar={comment.authorAvatar || undefined}
@@ -199,7 +210,7 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
               {formatRelativeTime(comment.timestamp)}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         <Text style={styles.commentText}>{comment.text}</Text>
 
@@ -299,49 +310,19 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
         >
           {/* Post Detail Card */}
           <GlassCard style={styles.postCard} noTouch>
-            {/* Author Row */}
-            <View style={styles.postAuthorRow}>
-              <AvatarBadge
-                name={post.authorName}
-                avatar={post.authorAvatar || undefined}
-                size={44}
-                role={roleKey}
-                verified={post.verified}
-              />
-              <View style={styles.postAuthorInfo}>
-                <View style={styles.postAuthorNameRow}>
-                  <Text style={styles.postAuthorName}>{post.authorName}</Text>
-                  {post.verified && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={16}
-                      color={roleBadge.color}
-                      style={{ marginLeft: 4 }}
-                    />
-                  )}
-                  {roleKey !== 'resident' && (
-                    <View
-                      style={[
-                        styles.rolePill,
-                        { backgroundColor: roleBadge.color + '30' },
-                      ]}
-                    >
-                      <Text style={[styles.rolePillText, { color: roleBadge.color }]}>
-                        {roleBadge.label}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.postMetaRow}>
-                  <Ionicons name="location-outline" size={12} color={Colors.textMuted} />
-                  <Text style={styles.postStreet}>{post.street}</Text>
-                  <Text style={styles.postDot}> &middot; </Text>
-                  <Text style={styles.postTimestamp}>
-                    {formatRelativeTime(post.timestamp)}
-                  </Text>
-                </View>
-              </View>
-            </View>
+            {/* Author Row — tappable */}
+            <TappableAuthor
+              userId={post.authorId}
+              name={post.authorName}
+              avatar={post.authorAvatar}
+              role={roleKey}
+              verified={post.verified}
+              size={44}
+              showStreet
+              street={post.street}
+              showTimestamp
+              timestamp={post.timestamp}
+            />
 
             {/* Category */}
             <View style={styles.categoryRow}>

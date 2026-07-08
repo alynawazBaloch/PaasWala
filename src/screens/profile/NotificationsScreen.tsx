@@ -12,10 +12,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Colors from '../../utils/colors';
 import GlassCard from '../../components/glass/GlassCard';
+import { useAuth } from '../../context/AuthContext';
 import {
-  getNotifications,
+  listenNotifications,
   markNotificationRead,
   clearAllNotifications,
+  deleteNotification,
 } from '../../services/dataService';
 import type { NotificationItem } from '../../services/dataService';
 
@@ -32,36 +34,43 @@ const NOTIFICATION_ICONS: Record<
   comment: { icon: 'chatbubble', color: Colors.accent },
   alert: { icon: 'alert', color: Colors.warning },
   follow: { icon: 'person', color: '#4A90D9' },
+  message: { icon: 'chatbubble-ellipses', color: Colors.accent },
+  friend_request: { icon: 'person-add', color: '#4A90D9' },
+  friend_accepted: { icon: 'people', color: '#52B788' },
+  call: { icon: 'call', color: Colors.accent },
 };
 
 const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
 
   useEffect(() => {
-    loadNotifications();
-  }, []);
+    if (!user?.uid) return;
+    const unsub = listenNotifications(user.uid, (items) => {
+      setNotifications(items);
+    });
+    return unsub;
+  }, [user?.uid]);
 
-  const loadNotifications = async () => {
-    try {
-      const all = await getNotifications();
-      setNotifications(all);
-    } catch (err) {
-      console.error('Failed to load notifications', err);
-    }
-  };
+  const filteredNotifications = useMemo(() => {
+    if (activeTab === 'unread') return notifications.filter((n) => n.isUnread);
+    return notifications;
+  }, [notifications, activeTab]);
 
   const notificationGroups = useMemo(() => {
     const map = new Map<string, NotificationItem[]>();
-    notifications.forEach((item) => {
+    filteredNotifications.forEach((item) => {
       const group = map.get(item.date) || [];
       group.push(item);
       map.set(item.date, group);
     });
     return Array.from(map.entries()).map(([date, items]) => ({ date, items }));
-  }, [notifications]);
+  }, [filteredNotifications]);
 
-  const hasUnread = notifications.some((item) => item.isUnread);
+  const unreadCount = notifications.filter((item) => item.isUnread).length;
+  const hasUnread = unreadCount > 0;
 
   const handleMarkAllRead = useCallback(async () => {
     const unreadIds = notifications
@@ -77,20 +86,66 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     }
   }, [notifications]);
 
-  const handleNotificationPress = useCallback(async (item: NotificationItem) => {
-    if (item.isUnread) {
-      try {
-        await markNotificationRead(item.id);
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === item.id ? { ...n, isUnread: false } : n))
-        );
-      } catch (err) {
-        console.error('Failed to mark notification read', err);
+  const handleNotificationPress = useCallback(
+    async (item: NotificationItem) => {
+      // Mark as read
+      if (item.isUnread) {
+        try {
+          await markNotificationRead(item.id);
+          setNotifications((prev) =>
+            prev.map((n) => (n.id === item.id ? { ...n, isUnread: false } : n))
+          );
+        } catch (err) {
+          console.error('Failed to mark notification read', err);
+        }
       }
-    }
-  }, []);
+
+      // Navigate based on type
+      if (item.type === 'like' || item.type === 'comment') {
+        if (item.targetId) {
+          navigation.navigate('PostDetail', { post: { id: item.targetId } });
+        }
+      } else if (item.type === 'follow' || item.type === 'friend_accepted') {
+        if (item.fromUserId) {
+          navigation.navigate('AuthorProfile', { userId: item.fromUserId });
+        }
+      } else if (item.type === 'friend_request') {
+        navigation.navigate('FriendRequests');
+      } else if (item.type === 'message') {
+        navigation.navigate('ChatList');
+      } else if (item.type === 'alert') {
+        navigation.navigate('AlertsList');
+      } else if (item.type === 'call') {
+        navigation.navigate('ChatList');
+      }
+    },
+    [navigation]
+  );
+
+  const handleDeleteNotification = useCallback(
+    async (item: NotificationItem, e: any) => {
+      e.stopPropagation();
+      Alert.alert('Delete', 'Delete this notification?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteNotification(item.id);
+              setNotifications((prev) => prev.filter((n) => n.id !== item.id));
+            } catch (err) {
+              console.error('Failed to delete notification', err);
+            }
+          },
+        },
+      ]);
+    },
+    []
+  );
 
   const handleClearAll = useCallback(() => {
+    if (notifications.length === 0) return;
     Alert.alert('Clear All', 'Clear all notifications?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -106,7 +161,7 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         },
       },
     ]);
-  }, []);
+  }, [notifications]);
 
   const renderNotificationItem = (item: NotificationItem) => {
     const iconConfig = NOTIFICATION_ICONS[item.type];
@@ -128,7 +183,12 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           <Ionicons name={iconConfig.icon} size={20} color={iconConfig.color} />
         </View>
         <View style={styles.notifContent}>
-          <Text style={[styles.notifTitle, item.isUnread && styles.notifTitleUnread]}>
+          <Text
+            style={[
+              styles.notifTitle,
+              item.isUnread && styles.notifTitleUnread,
+            ]}
+          >
             {item.title}
           </Text>
           {item.body ? (
@@ -138,8 +198,12 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
           ) : null}
           <Text style={styles.notifTimestamp}>{item.timestamp}</Text>
         </View>
-        <TouchableOpacity style={styles.notifMore} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="ellipsis-horizontal" size={16} color={Colors.textMuted} />
+        <TouchableOpacity
+          style={styles.notifMore}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          onPress={(e) => handleDeleteNotification(item, e)}
+        >
+          <Ionicons name="close" size={16} color={Colors.textMuted} />
         </TouchableOpacity>
       </TouchableOpacity>
     );
@@ -152,7 +216,9 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         {group.items.map((item, index) => (
           <React.Fragment key={item.id}>
             {renderNotificationItem(item)}
-            {index < group.items.length - 1 && <View style={styles.notifDivider} />}
+            {index < group.items.length - 1 && (
+              <View style={styles.notifDivider} />
+            )}
           </React.Fragment>
         ))}
       </GlassCard>
@@ -187,6 +253,41 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         </View>
       </View>
 
+      {/* Tabs: All / Unread */}
+      <View style={styles.tabRow}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'all' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('all')}
+        >
+          <Text
+            style={[
+              styles.tabBtnText,
+              activeTab === 'all' && styles.tabBtnTextActive,
+            ]}
+          >
+            All
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'unread' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('unread')}
+        >
+          <Text
+            style={[
+              styles.tabBtnText,
+              activeTab === 'unread' && styles.tabBtnTextActive,
+            ]}
+          >
+            Unread
+          </Text>
+          {unreadCount > 0 && (
+            <View style={styles.unreadCountBadge}>
+              <Text style={styles.unreadCountText}>{unreadCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -196,11 +297,17 @@ const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         ) : (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconWrap}>
-              <Ionicons name="notifications-off-outline" size={56} color={Colors.textMuted} />
+              <Ionicons
+                name="notifications-off-outline"
+                size={56}
+                color={Colors.textMuted}
+              />
             </View>
             <Text style={styles.emptyTitle}>All caught up!</Text>
             <Text style={styles.emptySubtitle}>
-              No new notifications to show.
+              {activeTab === 'unread'
+                ? 'No unread notifications.'
+                : 'No new notifications to show.'}
             </Text>
           </View>
         )}
@@ -260,6 +367,51 @@ const styles = StyleSheet.create({
     borderColor: Colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  // Tabs
+  tabRow: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: Colors.glassBg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    padding: 3,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 9,
+    gap: 6,
+  },
+  tabBtnActive: {
+    backgroundColor: Colors.glassBorder + '40',
+  },
+  tabBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textMuted,
+    fontFamily: 'Inter',
+  },
+  tabBtnTextActive: {
+    color: Colors.textPrimary,
+  },
+  unreadCountBadge: {
+    backgroundColor: Colors.accent,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  unreadCountText: {
+    color: Colors.textPrimary,
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: 'Inter',
   },
 
   // Scroll

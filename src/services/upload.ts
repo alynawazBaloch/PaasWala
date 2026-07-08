@@ -11,6 +11,8 @@ import { storage } from './firebase';
  *
  * Returns the permanent download URL.
  */
+export const uploadMedia = uploadImage;
+
 export async function uploadImage(
   localUri: string,
   storagePath: string

@@ -1,36 +1,295 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth.uid == userId;
+
+    /* ================================================================== */
+    /*  Helper functions                                                    */
+    /* ================================================================== */
+
+    function isAuth() { return request.auth != null; }
+    function isOwner(uid) { return request.auth.uid == uid; }
+    function getUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    match /neighborhoods/{neighborhoodId}/{document=**} {
-      allow read: if request.auth != null && isVerifiedResident(neighborhoodId);
-      allow write: if request.auth != null && isAdmin(neighborhoodId);
-      allow create: if request.auth != null && isVerifiedResident(neighborhoodId);
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
     }
-    match /neighborhoods/{nId}/posts/{postId}/likes/{likeId} {
-      allow read: if isPostAuthor(nId, postId) ||
-        getPost(nId, postId).likesPrivacy == 'public';
-    }
-    match /chats/{chatId}/{document=**} {
-      allow read, write: if request.auth.uid in
-        get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-    }
-    match /notifications/{userId}/{document=**} {
-      allow read, write: if request.auth.uid == userId;
-    }
-    function isVerifiedResident(neighborhoodId) {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.verified == true
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.neighborhoodId == neighborhoodId;
-    }
-    function isAdmin(neighborhoodId) {
-      let role = get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    function getUserRole(uid) { return getUserData(uid).role; }
+    function isVerified() { return getUser().verified == true; }
+    function isAdmin() {
+      let role = getUser().role;
       return role == 'admin' || role == 'superAdmin';
     }
-    function isPostAuthor(nId, postId) {
-      return get(/databases/$(database)/documents/neighborhoods/$(nId)/posts/$(postId)).data.authorId == request.auth.uid;
+    function isSuperAdmin() { return getUser().role == 'superAdmin'; }
+    function isBusinessOwner() { return getUser().role == 'business'; }
+
+    function isNotBlockedByMe(targetUid) {
+      let myBlocked = getUser().blockedUsers;
+      let theirBlocked = getUserData(targetUid).blockedUsers;
+      return !(myBlocked != null && targetUid in myBlocked)
+          && !(theirBlocked != null && request.auth.uid in theirBlocked);
+    }
+
+    function isNeighbor(nId) { return getUser().neighborhoodId == nId; }
+    function isVerifiedResident(nId) { return isVerified() && isNeighbor(nId); }
+
+    /* ================================================================== */
+    /*  Users                                                               */
+    /* ================================================================== */
+
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isOwner(userId);
+      allow update: if isAuth() && isOwner(userId);
+      allow delete: if isAuth() && (isOwner(userId) || isSuperAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Posts                                                               */
+    /* ================================================================== */
+
+    match /posts/{postId} {
+      allow read: if isAuth() && isNotBlockedByMe(
+        get(/databases/$(database)/documents/posts/$(postId)).data.authorId);
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        request.resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (
+        request.resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Comments                                                            */
+    /* ================================================================== */
+
+    match /comments/{commentId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && request.resource.data.authorId == request.auth.uid;
+      allow delete: if isAuth() && (
+        request.resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Chats & Messages                                                    */
+    /* ================================================================== */
+
+    match /chats/{chatId} {
+      allow read: if isAuth() &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      allow create: if isAuth();
+      allow update: if isAuth() && request.auth.uid in resource.data.participants;
+      allow delete: if isAuth() && request.auth.uid in resource.data.participants;
+    }
+
+    match /chats/{chatId}/messages/{messageId} {
+      allow read: if isAuth() &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      allow create: if isAuth() &&
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+      allow update: if isAuth() && request.resource.data.senderId == request.auth.uid;
+      allow delete: if isAuth() && (
+        request.resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Notifications                                                       */
+    /* ================================================================== */
+
+    match /notifications/{notificationId} {
+      allow read: if isAuth() && resource.data.recipientId == request.auth.uid;
+      allow create: if isAuth();
+      allow update: if isAuth() && request.resource.data.recipientId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.recipientId == request.auth.uid;
+    }
+
+    /* ================================================================== */
+    /*  Alerts                                                              */
+    /* ================================================================== */
+
+    match /alerts/{alertId} {
+      allow read: if isAuth() && isNotBlockedByMe(resource.data.createdBy);
+      allow create: if isAuth() && (isVerifiedResident(resource.data.neighborhoodId) || isAdmin());
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Events                                                              */
+    /* ================================================================== */
+
+    match /events/{eventId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdById == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (
+        resource.data.createdById == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Listings (Marketplace)                                              */
+    /* ================================================================== */
+
+    match /listings/{listingId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.sellerId == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (
+        resource.data.sellerId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Lost & Found                                                        */
+    /* ================================================================== */
+
+    match /lost_found/{itemId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.reporterId == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (
+        resource.data.reporterId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Businesses                                                          */
+    /* ================================================================== */
+
+    match /businesses/{businessId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isBusinessOwner();
+      allow update: if isAuth() && (
+        resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (isAdmin() || isSuperAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Business Reviews                                                    */
+    /* ================================================================== */
+
+    match /business_reviews/{reviewId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow delete: if isAuth() && (
+        resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Polls                                                               */
+    /* ================================================================== */
+
+    match /polls/{pollId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth() && (
+        resource.data.createdById == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Stories                                                             */
+    /* ================================================================== */
+
+    match /stories/{storyId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow delete: if isAuth() && (
+        resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Connections (Follow / Friend)                                       */
+    /* ================================================================== */
+
+    match /connections/{connectionId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid);
+      allow delete: if isAuth() && (
+        resource.data.fromUserId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Post Reports                                                        */
+    /* ================================================================== */
+
+    match /post_reports/{reportId} {
+      allow read: if isAuth() && (
+        resource.data.reportedBy == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  User Reports                                                        */
+    /* ================================================================== */
+
+    match /user_reports/{reportId} {
+      allow read: if isAuth() && (
+        resource.data.reportedBy == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Verification Requests                                               */
+    /* ================================================================== */
+
+    match /verification_requests/{requestId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Neighborhoods                                                       */
+    /* ================================================================== */
+
+    match /neighborhoods/{neighborhoodId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isSuperAdmin();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isSuperAdmin();
+    }
+
+    match /neighborhoods/{neighborhoodId}/admins/{adminId} {
+      allow read: if isAuth() && isNeighbor(neighborhoodId);
+      allow write: if isAuth() && isSuperAdmin();
+    }
+
+    /* ================================================================== */
+    /*  User tokens (FCM push)                                              */
+    /* ================================================================== */
+
+    match /users/{userId}/tokens/{tokenId} {
+      allow read, write: if isAuth() && isOwner(userId);
+    }
+
+    /* ================================================================== */
+    /*  Story Views                                                         */
+    /* ================================================================== */
+
+    match /story_views/{viewId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow delete: if isAuth();
+    }
+
+    /* ================================================================== */
+    /*  Deny everything else                                                */
+    /* ================================================================== */
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

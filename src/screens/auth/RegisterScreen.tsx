@@ -22,6 +22,8 @@ import GlowButton from '../../components/glass/GlowButton';
 import GlowInput from '../../components/glass/GlowInput';
 import { isValidEmail, getPasswordStrength } from '../../utils/validators';
 import { sendEmail } from '../../services/brevo';
+import { enrichCoordinates, captureLocationForSignup } from '../../services/location';
+import { geohashForLocation } from 'geofire-common';
 
 const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [step, setStep] = useState(1);
@@ -58,47 +60,31 @@ const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [addressError, setAddressError] = useState('');
   const [sendError, setSendError] = useState('');
 
+  // Location / Geohash state
+  const [capturedLat, setCapturedLat] = useState<number>(31.481120);
+  const [capturedLng, setCapturedLng] = useState<number>(74.314970);
+  const [capturedGeohash, setCapturedGeohash] = useState<string>('');
+
   useEffect(() => {
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          console.warn('[Register] Location permission not granted:', status);
+        const { locationData, permissionDenied } = await captureLocationForSignup();
+        if (permissionDenied) {
+          console.warn('[Register] Location permission denied');
           return;
         }
-        // Use Balanced accuracy — works reliably on most devices
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setMapRegion({
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        });
-        // Auto-fill address from current location
-        try {
-          const results = await Location.reverseGeocodeAsync({
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-          });
-          if (results.length > 0) {
-            const addr = results[0];
-            if (addr.street || addr.name) {
-              setStreetAddress(
-                [addr.street, addr.name].filter(Boolean).join(', ')
-              );
-            }
-            if (addr.district || addr.subregion) {
-              setArea(addr.district || addr.subregion || '');
-            }
-            if (addr.city) setCity(addr.city);
-          }
-        } catch (geoErr) {
-          console.warn('[Register] Reverse geocode failed:', geoErr);
+        if (locationData) {
+          const { latitude, longitude, geohash, address, area: locArea, city: locCity } = locationData;
+          setCapturedLat(latitude);
+          setCapturedLng(longitude);
+          setCapturedGeohash(geohash);
+          setMapRegion({ latitude, longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 });
+          if (address) setStreetAddress(address);
+          if (locArea) setArea(locArea);
+          if (locCity) setCity(locCity);
         }
-      } catch (locErr) {
-        console.warn('[Register] Location fetch failed:', locErr);
+      } catch (err) {
+        console.warn('[Register] Location capture failed:', err);
       }
     })();
   }, []);
@@ -249,6 +235,13 @@ const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             phone: phone.trim(),
             password: password,
             avatar: avatarUri || undefined,
+            // Location
+            latitude: capturedLat,
+            longitude: capturedLng,
+            geohash: capturedGeohash,
+            address: streetAddress.trim(),
+            area: area.trim(),
+            city: city.trim(),
           },
         });
       }

@@ -7,5 +7,6 @@
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "moduleResolution": "bundler"
-  }
+  },
+  "exclude": ["functions"]
 }

@@ -196,8 +196,8 @@ const OTPScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, rout
     try {
       // Create Firebase Auth account + Firestore profile
       await register(formData);
-      // Navigate to address verification
-      navigation.replace('AddressVerification');
+      // AppNavigator will automatically show AddressVerification
+      // since user is not verified yet
     } catch (err: any) {
       setError(err.message || 'Failed to create account. Please try again.');
       triggerShake();

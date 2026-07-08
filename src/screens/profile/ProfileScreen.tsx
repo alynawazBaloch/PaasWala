@@ -20,13 +20,20 @@ import GlowButton from '../../components/glass/GlowButton';
 import AvatarBadge from '../../components/shared/AvatarBadge';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
-import { getPosts, getUsers, getEvents } from '../../services/dataService';
+import { getPosts, getUsers, getEvents, getReputationTier, getTierProgress } from '../../services/dataService';
 import type { Post } from '../../services/dataService';
+import { useFollow } from '../../hooks/useFollow';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_HEIGHT = 200;
 
 type ContentTab = 'posts' | 'saved' | 'listings';
+
+const TIER_CONFIG = {
+  bronze: { label: 'Bronze', color: '#CD7F32', glow: 'rgba(205,127,50,0.4)' },
+  silver: { label: 'Silver', color: '#C0C0C0', glow: 'rgba(192,192,192,0.4)' },
+  gold: { label: 'Gold', color: '#FFD700', glow: 'rgba(255,215,0,0.4)' },
+} as const;
 
 const ProfileScreen: React.FC = () => {
   const [activeContentTab, setActiveContentTab] = useState<ContentTab>('posts');
@@ -35,6 +42,7 @@ const ProfileScreen: React.FC = () => {
   const [neighborCount, setNeighborCount] = useState(0);
   const [eventCount, setEventCount] = useState(0);
   const { user, logout } = useAuth();
+  const { followingCount, followersCount } = useFollow();
   const insets = useSafeAreaInsets();
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const repAnim = useRef(new Animated.Value(0)).current;
@@ -89,24 +97,13 @@ const ProfileScreen: React.FC = () => {
   });
 
   const repScore = user?.reputationScore ?? 125;
-  const maxRep = 300;
-  const repPercent = Math.min(repScore / maxRep, 1);
-  const animatedRepWidth = repAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', `${repPercent * 100}%`],
-  });
-
-  const getRepTier = () => {
-    if (repScore >= 200) return { label: 'Gold', color: '#FFD700', glow: 'rgba(255,215,0,0.4)' };
-    if (repScore >= 50) return { label: 'Silver', color: '#C0C0C0', glow: 'rgba(192,192,192,0.4)' };
-    return { label: 'Bronze', color: '#CD7F32', glow: 'rgba(205,127,50,0.4)' };
-  };
-
-  const repTier = getRepTier();
+  const tier = getReputationTier(repScore);
+  const tierProgress = getTierProgress(repScore);
+  const repTierConfig = TIER_CONFIG[tier];
 
   const repBarWidth = repAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', `${(repScore / maxRep) * 100}%`],
+    outputRange: ['0%', `${tierProgress.progress * 100}%`],
   });
 
   const handleLogout = async () => {
@@ -199,50 +196,94 @@ const ProfileScreen: React.FC = () => {
     </View>
   );
 
-  const renderReputationBar = () => (
-    <View style={styles.repSection}>
-      <View style={styles.repHeader}>
-        <Text style={styles.repTitle}>Reputation</Text>
-        <View style={[styles.tierBadge, { backgroundColor: repTier.color + '30', borderColor: repTier.color }]}>
-          <LinearGradient
-            colors={['transparent', repTier.glow]}
-            style={StyleSheet.absoluteFill}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-          <Text style={[styles.tierText, { color: repTier.color }]}>{repTier.label}</Text>
+  const renderReputationCard = () => {
+    const progressDisplay = tier === 'gold'
+      ? '500 / 500 pts'
+      : `${Math.min(repScore, tierProgress.next)} / ${tierProgress.next} pts`;
+
+    return (
+      <GlassCard style={styles.repCard} noTouch>
+        {/* Header: title + tier pill badge */}
+        <View style={styles.repCardHeader}>
+          <View style={styles.repCardTitleRow}>
+            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.accent} />
+            <Text style={styles.repCardTitle}>Reputation</Text>
+          </View>
+          <View
+            style={[
+              styles.tierPill,
+              {
+                backgroundColor: repTierConfig.color + '20',
+                borderColor: repTierConfig.color,
+              },
+            ]}
+          >
+            <Ionicons name="star" size={12} color={repTierConfig.color} />
+            <Text style={[styles.tierPillText, { color: repTierConfig.color }]}>
+              {repTierConfig.label}
+            </Text>
+          </View>
         </View>
-      </View>
-      <View style={styles.repBarBg}>
-        <Animated.View style={[styles.repBarFill, { width: repBarWidth }]}>
-          <LinearGradient
-            colors={[Colors.primary, Colors.accent, Colors.glow]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
-      </View>
-      <View style={styles.repScoreRow}>
-        <Text style={styles.repScoreValue}>{repScore} pts</Text>
-        <Text style={styles.repScoreMax}>/ {maxRep}</Text>
-      </View>
-    </View>
-  );
+
+        {/* Score number */}
+        <Text style={[styles.repScoreLarge, { color: repTierConfig.color }]}>
+          {repScore}
+        </Text>
+        <Text style={styles.repScoreCaption}>reputation points</Text>
+
+        {/* Progress bar */}
+        <View style={styles.repBarBg}>
+          <Animated.View style={[styles.repBarFill, { width: repBarWidth }]}>
+            <LinearGradient
+              colors={[repTierConfig.color, repTierConfig.glow]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        </View>
+
+        {/* Progress labels */}
+        <View style={styles.repProgressRow}>
+          <Text style={styles.repProgressText}>{progressDisplay}</Text>
+          <Text style={[styles.repProgressTierLabel, { color: repTierConfig.color }]}>
+            {repTierConfig.label} Tier
+          </Text>
+        </View>
+
+        {/* Points explanation */}
+        <Text style={styles.repExplanation}>
+          Earn points by posting, liking, attending events, and more!
+        </Text>
+      </GlassCard>
+    );
+  };
 
   const renderStatsRow = () => (
     <View style={styles.statsRow}>
+      <TouchableOpacity
+        style={styles.statCardTouch}
+        onPress={() => navigation.navigate('FollowersList', { userId: user?.uid ?? '' })}
+        activeOpacity={0.7}
+      >
+        <GlassCard style={styles.statCard} noTouch>
+          <Text style={styles.statNumber}>{followersCount}</Text>
+          <Text style={styles.statLabel}>Followers</Text>
+        </GlassCard>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.statCardTouch}
+        onPress={() => navigation.navigate('FollowingList', { userId: user?.uid ?? '' })}
+        activeOpacity={0.7}
+      >
+        <GlassCard style={styles.statCard} noTouch>
+          <Text style={styles.statNumber}>{followingCount}</Text>
+          <Text style={styles.statLabel}>Following</Text>
+        </GlassCard>
+      </TouchableOpacity>
       <GlassCard style={styles.statCard} noTouch>
         <Text style={styles.statNumber}>{postCount}</Text>
         <Text style={styles.statLabel}>Posts</Text>
-      </GlassCard>
-      <GlassCard style={styles.statCard} noTouch>
-        <Text style={styles.statNumber}>{neighborCount}</Text>
-        <Text style={styles.statLabel}>Neighbors</Text>
-      </GlassCard>
-      <GlassCard style={styles.statCard} noTouch>
-        <Text style={styles.statNumber}>{eventCount}</Text>
-        <Text style={styles.statLabel}>Events</Text>
       </GlassCard>
     </View>
   );
@@ -312,6 +353,7 @@ const ProfileScreen: React.FC = () => {
 
   const renderSettingsLinks = () => {
     const links = [
+      { icon: 'people-outline' as const, label: 'Find People', onPress: () => navigation.navigate('FindPeople') },
       { icon: 'settings-outline' as const, label: 'Settings', onPress: () => navigation.navigate('Settings') },
       { icon: 'notifications-outline' as const, label: 'Notifications', onPress: () => navigation.navigate('Notifications') },
       { icon: 'help-circle-outline' as const, label: 'Help & Support', onPress: () => Alert.alert('Help', 'Help & Support coming soon.') },
@@ -359,7 +401,7 @@ const ProfileScreen: React.FC = () => {
       >
         {renderCover()}
         {renderProfileInfo()}
-        {renderReputationBar()}
+        {renderReputationCard()}
         {renderStatsRow()}
         {renderContentTabs()}
 
@@ -503,43 +545,62 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
   },
 
-  // Reputation
-  repSection: {
+  // Reputation Card
+  repCard: {
     marginHorizontal: 20,
     marginBottom: 20,
-    backgroundColor: Colors.glassBg,
+    padding: 20,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    padding: 16,
+    alignItems: 'center',
   },
-  repHeader: {
+  repCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    width: '100%',
+    marginBottom: 16,
   },
-  repTitle: {
+  repCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  repCardTitle: {
     fontSize: 15,
     fontWeight: '600',
     color: Colors.textPrimary,
     fontFamily: 'Inter',
   },
-  tierBadge: {
+  tierPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    gap: 4,
   },
-  tierText: {
+  tierPillText: {
     fontSize: 12,
     fontWeight: '700',
     fontFamily: 'Inter',
   },
+  repScoreLarge: {
+    fontSize: 48,
+    fontWeight: '800',
+    fontFamily: 'Inter',
+    lineHeight: 52,
+  },
+  repScoreCaption: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontFamily: 'Inter',
+    marginBottom: 16,
+  },
   repBarBg: {
-    height: 8,
-    borderRadius: 4,
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
     backgroundColor: Colors.glassBg,
     overflow: 'hidden',
     borderWidth: 1,
@@ -547,25 +608,34 @@ const styles = StyleSheet.create({
   },
   repBarFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: 5,
     overflow: 'hidden',
   },
-  repScoreRow: {
+  repProgressRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
     marginTop: 8,
   },
-  repScoreValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.accent,
+  repProgressText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
     fontFamily: 'Inter',
   },
-  repScoreMax: {
+  repProgressTierLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Inter',
+  },
+  repExplanation: {
     fontSize: 12,
     color: Colors.textMuted,
     fontFamily: 'Inter',
-    marginLeft: 2,
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 16,
   },
 
   // Stats
@@ -574,6 +644,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 10,
     marginBottom: 20,
+  },
+  statCardTouch: {
+    flex: 1,
   },
   statCard: {
     flex: 1,

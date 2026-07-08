@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,22 +15,83 @@ import GlassCard from '../../components/glass/GlassCard';
 import GlowButton from '../../components/glass/GlowButton';
 import AvatarBadge from '../../components/shared/AvatarBadge';
 import Colors from '../../utils/colors';
+import { useAuth } from '../../context/AuthContext';
+import { updateListingStatus, incrementListingViews } from '../../services/dataService';
+import { formatTimestamp } from '../../utils/helpers';
+import type { Listing } from '../../services/dataService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  available: { label: 'Available', color: Colors.success, icon: 'checkmark-circle' },
+  reserved: { label: 'Reserved', color: '#FFD700', icon: 'time-outline' },
+  sold: { label: 'Sold', color: Colors.error, icon: 'close-circle' },
+};
+
 const ListingDetailScreen: React.FC<{ navigation: any; route: any }> = ({ navigation, route }) => {
+  const { user: currentUser } = useAuth();
   const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const listing = route?.params?.listing;
-  const listingImages = listing?.images?.length ? listing.images.map((u: string, i: number) => ({ id: `img_${i}`, uri: u })) : [{ id: '1', uri: null }, { id: '2', uri: null }, { id: '3', uri: null }];
+  const [isSaved, setIsSaved] = useState(false);
 
-  const handleBack = () => {
+  const listing: Listing | undefined = route?.params?.listing;
+
+  // Track view on mount
+  React.useEffect(() => {
+    if (listing?.id) {
+      incrementListingViews(listing.id).catch(() => {});
+    }
+  }, [listing?.id]);
+
+  const images: string[] = React.useMemo(() => {
+    if (listing?.images && listing.images.length > 0) {
+      return listing.images;
+    }
+    if (listing?.image) {
+      return [listing.image];
+    }
+    return [];
+  }, [listing]);
+
+  const handleBack = useCallback(() => {
     navigation.goBack();
-  };
+  }, [navigation]);
 
-  const title = listing?.title || 'Vintage Wooden Desk';
-  const price = listing?.price || 25000;
-  const location = listing?.location || 'Block A, Green Valley';
-  const condition = listing?.condition || 'Like New';
+  const handleStatusUpdate = useCallback(
+    async (status: 'available' | 'reserved' | 'sold') => {
+      if (!listing?.id) return;
+      try {
+        await updateListingStatus(listing.id, status);
+        Alert.alert('Updated', `Listing marked as ${status}.`);
+      } catch {
+        Alert.alert('Error', 'Failed to update listing status.');
+      }
+    },
+    [listing?.id],
+  );
+
+  const handleMessage = useCallback(() => {
+    Alert.alert('Message', 'Messaging the seller will be available soon.');
+  }, []);
+
+  const toggleSave = useCallback(() => {
+    setIsSaved((prev) => !prev);
+  }, []);
+
+  if (!listing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color={Colors.textMuted} />
+          <Text style={styles.errorText}>Listing not found</Text>
+          <GlowButton title="Go Back" onPress={handleBack} size="sm" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const statusConfig = listing.status ? STATUS_CONFIG[listing.status] : null;
+  const isOwnListing = currentUser?.uid === listing.sellerId;
+  const displayPrice = listing.price === 0 ? 'Free' : `PKR ${listing.price?.toLocaleString()}`;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -41,72 +102,129 @@ const ListingDetailScreen: React.FC<{ navigation: any; route: any }> = ({ naviga
       >
         {/* Image Carousel */}
         <View style={styles.carouselContainer}>
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onMomentumScrollEnd={(e) => {
-              const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-              setActiveImageIndex(index);
-            }}
-          >
-            {listingImages.map((img, idx) => (
-              <View key={img.id} style={[styles.carouselImageContainer, { width: SCREEN_WIDTH }]}>
-                {img.uri ? (
-                  <Image source={{ uri: img.uri }} style={styles.carouselImage} />
-                ) : (
-                  <View style={styles.carouselPlaceholder}>
-                    <Ionicons name="image" size={64} color={Colors.textMuted} />
-                    <Text style={styles.carouselPlaceholderText}>
-                      Listing Photo {idx + 1}
-                    </Text>
+          {images.length > 0 ? (
+            <>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e) => {
+                  const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                  setActiveImageIndex(index);
+                }}
+              >
+                {images.map((uri, idx) => (
+                  <View key={`img-${idx}`} style={[styles.carouselImageContainer, { width: SCREEN_WIDTH }]}>
+                    <Image source={{ uri }} style={styles.carouselImage} />
                   </View>
-                )}
-              </View>
-            ))}
-          </ScrollView>
+                ))}
+              </ScrollView>
+
+              {/* Dot Indicators */}
+              {images.length > 1 && (
+                <View style={styles.dotsContainer}>
+                  {images.map((_, idx) => (
+                    <View
+                      key={`dot-${idx}`}
+                      style={[styles.dot, idx === activeImageIndex && styles.dotActive]}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={[styles.carouselImageContainer, styles.carouselPlaceholder, { width: SCREEN_WIDTH }]}>
+              <Ionicons name="image-outline" size={64} color={Colors.textMuted} />
+              <Text style={styles.carouselPlaceholderText}>No photos</Text>
+            </View>
+          )}
 
           {/* Back Button */}
           <TouchableOpacity style={styles.backButton} onPress={handleBack}>
             <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
           </TouchableOpacity>
 
-          {/* Image Dots */}
-          <View style={styles.dotsContainer}>
-            {listingImages.map((_, idx) => (
-              <View
-                key={`dot-${idx}`}
-                style={[
-                  styles.dot,
-                  idx === activeImageIndex && styles.dotActive,
-                ]}
-              />
-            ))}
-          </View>
+          {/* Save Button */}
+          <TouchableOpacity style={styles.saveButton} onPress={toggleSave}>
+            <Ionicons
+              name={isSaved ? 'heart' : 'heart-outline'}
+              size={22}
+              color={isSaved ? Colors.error : Colors.textPrimary}
+            />
+          </TouchableOpacity>
         </View>
 
         {/* Info Card */}
-        <GlassCard style={styles.infoCard}>
-          <Text style={styles.listingTitle}>{title}</Text>
-          <Text style={styles.listingPrice}>PKR {price?.toLocaleString()}</Text>
+        <GlassCard style={styles.infoCard} noTouch>
+          {/* Status Badge */}
+          {statusConfig && (
+            <View style={[styles.statusBadge, { backgroundColor: statusConfig.color + '20', borderColor: statusConfig.color }]}>
+              <Ionicons name={statusConfig.icon} size={14} color={statusConfig.color} />
+              <Text style={[styles.statusBadgeText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
+            </View>
+          )}
 
+          {/* Title */}
+          <Text style={styles.listingTitle}>{listing.title}</Text>
+
+          {/* Price */}
+          {listing.price === 0 ? (
+            <View style={styles.freeBadge}>
+              <Text style={styles.freeBadgeText}>Free</Text>
+            </View>
+          ) : (
+            <Text style={styles.listingPrice}>{displayPrice}</Text>
+          )}
+
+          {/* Badge Row */}
           <View style={styles.badgeRow}>
-            <View style={styles.conditionBadge}>
-              <Ionicons name="checkmark-circle" size={14} color={Colors.accent} />
-              <Text style={styles.conditionBadgeText}>{condition}</Text>
-            </View>
-            <View style={styles.locationBadge}>
-              <Ionicons name="location" size={14} color={Colors.textMuted} />
-              <Text style={styles.locationBadgeText}>{location}</Text>
-            </View>
+            {listing.condition && (
+              <View style={styles.conditionBadge}>
+                <Ionicons name="checkmark-circle" size={14} color={Colors.accent} />
+                <Text style={styles.conditionBadgeText}>{listing.condition}</Text>
+              </View>
+            )}
+            {listing.location && (
+              <View style={styles.locationBadge}>
+                <Ionicons name="location" size={14} color={Colors.textMuted} />
+                <Text style={styles.locationBadgeText}>{listing.location}</Text>
+              </View>
+            )}
+            {listing.category && (
+              <View style={styles.categoryBadge}>
+                <Text style={styles.categoryBadgeText}>{listing.category}</Text>
+              </View>
+            )}
           </View>
+
+          {/* View Count */}
+          {typeof listing.viewCount === 'number' && (
+            <View style={styles.viewCountRow}>
+              <Ionicons name="eye-outline" size={14} color={Colors.textMuted} />
+              <Text style={styles.viewCountText}>{listing.viewCount} views</Text>
+            </View>
+          )}
 
           <View style={styles.divider} />
 
-          <Text style={styles.sectionTitle}>Description</Text>
-          <Text style={styles.description}>
-            {listing?.description || `Beautiful ${title} in excellent condition. Great addition to your home or office.`}
-          </Text>
+          {/* Description */}
+          {listing.description ? (
+            <>
+              <Text style={styles.sectionTitle}>Description</Text>
+              <Text style={styles.description}>{listing.description}</Text>
+              <View style={styles.divider} />
+            </>
+          ) : null}
+
+          {/* Timestamp */}
+          {listing.timestamp && (
+            <View style={styles.timestampRow}>
+              <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+              <Text style={styles.timestampText}>
+                Listed {formatTimestamp(listing.timestamp)}
+              </Text>
+            </View>
+          )}
 
           <View style={styles.divider} />
 
@@ -114,23 +232,58 @@ const ListingDetailScreen: React.FC<{ navigation: any; route: any }> = ({ naviga
           <Text style={styles.sectionTitle}>Seller</Text>
           <View style={styles.sellerRow}>
             <AvatarBadge
-              name="Ahmad Khan"
+              name={listing.sellerName || 'Unknown'}
+              avatar={listing.sellerAvatar}
               size={48}
               role="resident"
               verified
             />
             <View style={styles.sellerInfo}>
-              <Text style={styles.sellerName}>Ahmad Khan</Text>
-              <Text style={styles.sellerDetail}>Member since 2024</Text>
+              <Text style={styles.sellerName}>{listing.sellerName || 'Unknown'}</Text>
+              <Text style={styles.sellerDetail}>Member</Text>
             </View>
-            <GlowButton
-              title="Message"
-              onPress={() => Alert.alert('Message', 'Messaging the seller will be available soon.')}
-              size="sm"
-              style={{ paddingHorizontal: 16 }}
-            />
+            {!isOwnListing && (
+              <GlowButton
+                title="Message"
+                onPress={handleMessage}
+                size="sm"
+                style={{ paddingHorizontal: 16 }}
+              />
+            )}
           </View>
         </GlassCard>
+
+        {/* Seller Actions */}
+        {isOwnListing && listing.status && listing.status !== 'sold' && (
+          <GlassCard style={styles.actionsCard} noTouch>
+            <Text style={styles.sectionTitle}>Manage Listing</Text>
+            {listing.status === 'available' && (
+              <GlowButton
+                title="Mark as Reserved"
+                onPress={() => handleStatusUpdate('reserved')}
+                variant="outline"
+                size="md"
+                style={styles.actionButton}
+              />
+            )}
+            {listing.status === 'reserved' && (
+              <GlowButton
+                title="Mark as Available"
+                onPress={() => handleStatusUpdate('available')}
+                variant="outline"
+                size="md"
+                style={styles.actionButton}
+              />
+            )}
+            <GlowButton
+              title="Mark as Sold"
+              onPress={() => handleStatusUpdate('sold')}
+              variant="danger"
+              size="md"
+              style={styles.actionButton}
+            />
+          </GlassCard>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -185,6 +338,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  saveButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.glassBg,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
   dotsContainer: {
     position: 'absolute',
     bottom: 16,
@@ -208,6 +375,22 @@ const styles = StyleSheet.create({
     marginTop: -24,
     zIndex: 5,
   },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 4,
+    marginBottom: 12,
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: 'Inter',
+  },
   listingTitle: {
     fontSize: 24,
     fontWeight: '700',
@@ -221,8 +404,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     marginTop: 6,
   },
+  freeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.accent + '30',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  freeBadgeText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.accent,
+    fontFamily: 'Inter',
+  },
   badgeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
   },
@@ -259,6 +457,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter',
   },
+  categoryBadge: {
+    backgroundColor: Colors.glassBg,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+  },
+  categoryBadgeText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+    fontFamily: 'Inter',
+  },
+  viewCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 10,
+  },
+  viewCountText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontFamily: 'Inter',
+  },
   divider: {
     height: 1,
     backgroundColor: Colors.glassBorder,
@@ -276,6 +499,16 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontFamily: 'Inter',
     lineHeight: 22,
+  },
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timestampText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    fontFamily: 'Inter',
   },
   sellerRow: {
     flexDirection: 'row',
@@ -296,6 +529,26 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontFamily: 'Inter',
     marginTop: 2,
+  },
+  actionsCard: {
+    margin: 16,
+    marginTop: 0,
+  },
+  actionButton: {
+    marginBottom: 10,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 24,
+  },
+  errorText: {
+    fontSize: 16,
+    color: Colors.textMuted,
+    fontFamily: 'Inter',
+    marginBottom: 8,
   },
 });
 

@@ -22,6 +22,13 @@ export const STORAGE_KEYS = {
   ADMIN_REPORTS: '@paaswala_admin_reports',
   SEED_DONE: '@paaswala_seed_done',
   USERS: '@paaswala_users',
+  CONNECTIONS: '@paaswala_connections',
+  NEARBY_USERS_CACHE: '@paaswala_nearby_cache',
+  FOLLOWING: '@paaswala_following',
+  FOLLOWERS: '@paaswala_followers',
+  FRIENDS: '@paaswala_friends',
+  FRIEND_REQUESTS: '@paaswala_friend_requests',
+  BOOKMARKED_MESSAGES: '@paaswala_bookmarked_messages',
 };
 
 export const REPUTATION = {

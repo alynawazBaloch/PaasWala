@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import {
   View,
@@ -8,113 +8,177 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GlassCard from '../../components/glass/GlassCard';
 import GlowButton from '../../components/glass/GlowButton';
+import GlassModal from '../../components/glass/GlassModal';
 import EmptyState3D from '../../components/shared/EmptyState3D';
 import Colors from '../../utils/colors';
 import { formatTimestamp } from '../../utils/helpers';
-import { getAlerts, resolveAlert as dsResolveAlert } from '../../services/dataService';
+import {
+  listenAlerts,
+  resolveAlert as dsResolveAlert,
+} from '../../services/dataService';
 import type { Alert as PSAlert } from '../../services/dataService';
+import { useAuth } from '../../context/AuthContext';
 
 const ALERT_TYPE_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  emergency: { icon: 'alert-circle', color: Colors.alertRed },
-  security: { icon: 'shield', color: Colors.alertOrange },
-  weather: { icon: 'thunderstorm', color: '#4A90D9' },
-  utility: { icon: 'flash', color: Colors.alertYellow },
-  traffic: { icon: 'compass', color: '#9B59B6' },
-  lost_pet: { icon: 'heart', color: '#E91E63' },
+  crime: { icon: 'shield', color: Colors.alertRed },
+  fire: { icon: 'flame', color: '#FF6B35' },
+  flood: { icon: 'water', color: '#4A90D9' },
+  medical: { icon: 'medkit', color: '#E91E63' },
+  power_outage: { icon: 'flash', color: Colors.alertYellow },
+  road_block: { icon: 'compass', color: '#9B59B6' },
   other: { icon: 'notifications', color: Colors.textSecondary },
 };
 
+const DANGER_TYPES = ['crime', 'fire', 'flood', 'medical'];
 
 const AlertsListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
-  const [activeAlerts, setActiveAlerts] = useState<PSAlert[]>([]);
-  const [resolvedAlerts, setResolvedAlerts] = useState<PSAlert[]>([]);
+  const [allAlerts, setAllAlerts] = useState<PSAlert[]>([]);
+  const [selectedAlert, setSelectedAlert] = useState<PSAlert | null>(null);
 
-  useEffect(() => { loadAlerts(); }, []);
+  useEffect(() => {
+    const unsub = listenAlerts((alerts) => {
+      setAllAlerts(alerts);
+    });
+    return unsub;
+  }, []);
 
-  const loadAlerts = async () => {
-    const all = await getAlerts();
-    setActiveAlerts(all.filter(a => !a.resolved));
-    setResolvedAlerts(all.filter(a => a.resolved));
-  };
-
-  const handleResolve = async (id: string) => {
-    await dsResolveAlert(id);
-    setActiveAlerts(prev => prev.filter(a => a.id !== id));
-    const all = await getAlerts();
-    setResolvedAlerts(all.filter(a => a.resolved));
-  };
-
+  const activeAlerts = allAlerts.filter((a) => !a.resolved);
+  const resolvedAlerts = allAlerts.filter((a) => a.resolved);
   const currentAlerts = activeTab === 'active' ? activeAlerts : resolvedAlerts;
+
+  const handleResolve = useCallback(
+    async (id: string) => {
+      Alert.alert('Resolve Alert', 'Mark this alert as resolved?', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Resolve',
+          style: 'destructive',
+          onPress: async () => {
+            await dsResolveAlert(id, user?.name || 'Admin');
+            setSelectedAlert(null);
+          },
+        },
+      ]);
+    },
+    [user?.name]
+  );
+
+  const handleAlertPress = useCallback((item: PSAlert) => {
+    setSelectedAlert(item);
+  }, []);
 
   const renderAlertCard = ({ item }: { item: PSAlert }) => {
     const config = ALERT_TYPE_CONFIG[item.type] || ALERT_TYPE_CONFIG.other;
     const isActive = !item.resolved;
+    const isDanger = DANGER_TYPES.includes(item.type);
 
     return (
-      <GlassCard
-        style={[
-          styles.alertCard,
-          isActive && { borderColor: Colors.alertRed, shadowColor: Colors.alertRed },
-          !isActive && { borderColor: Colors.glassBorder, opacity: 0.7 },
-        ]}
-        glowColor={isActive ? 'rgba(255,68,68,0.25)' : undefined}
-      >
-        <View style={styles.alertHeader}>
-          <View
-            style={[
-              styles.alertTypeIcon,
-              { backgroundColor: config.color + '20', borderColor: config.color + '40' },
-            ]}
-          >
-            <Ionicons name={config.icon} size={22} color={config.color} />
-          </View>
-          <View style={styles.alertHeaderText}>
-            <Text style={[styles.alertTitle, !isActive && { color: Colors.textMuted }]}>
-              {item.title}
-            </Text>
-            <View style={styles.alertMetaRow}>
-              <View style={styles.locationChip}>
-                <Ionicons name="location" size={12} color={Colors.textMuted} />
-                <Text style={styles.locationText}>{item.location}</Text>
+      <TouchableOpacity activeOpacity={0.8} onPress={() => handleAlertPress(item)}>
+        <GlassCard
+          style={[
+            styles.alertCard,
+            isActive && isDanger && {
+              borderColor: Colors.alertRed,
+              shadowColor: Colors.alertRed,
+              shadowOpacity: 0.4,
+              shadowRadius: 16,
+              elevation: 12,
+            },
+            isActive && !isDanger && {
+              borderColor: config.color + '80',
+              shadowColor: config.color,
+              shadowOpacity: 0.25,
+              shadowRadius: 10,
+              elevation: 8,
+            },
+            !isActive && { borderColor: Colors.glassBorder, opacity: 0.7 },
+          ]}
+          glowColor={
+            isActive && isDanger
+              ? 'rgba(255,68,68,0.35)'
+              : isActive
+              ? config.color + '30'
+              : undefined
+          }
+        >
+          {/* Red glow pulse bar for active danger alerts */}
+          {isActive && isDanger && <View style={styles.dangerGlowBar} />}
+
+          <View style={styles.alertHeader}>
+            <View
+              style={[
+                styles.alertTypeIcon,
+                {
+                  backgroundColor: config.color + '20',
+                  borderColor: config.color + '40',
+                },
+              ]}
+            >
+              <Ionicons name={config.icon} size={22} color={config.color} />
+            </View>
+            <View style={styles.alertHeaderText}>
+              <Text
+                style={[styles.alertTitle, !isActive && { color: Colors.textMuted }]}
+              >
+                {item.title}
+              </Text>
+              <View style={styles.alertMetaRow}>
+                <View style={styles.locationChip}>
+                  <Ionicons name="location" size={12} color={Colors.textMuted} />
+                  <Text style={styles.locationText}>{item.location}</Text>
+                </View>
+                {item.reportedByName && (
+                  <Text style={styles.reportedByText}>
+                    by {item.reportedByName}
+                  </Text>
+                )}
               </View>
             </View>
+            {isActive && isDanger && (
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+            )}
           </View>
-        </View>
 
-        <Text
-          style={[styles.alertDescription, !isActive && { color: Colors.textMuted }]}
-          numberOfLines={3}
-        >
-          {item.description}
-        </Text>
+          <Text
+            style={[styles.alertDescription, !isActive && { color: Colors.textMuted }]}
+            numberOfLines={3}
+          >
+            {item.description}
+          </Text>
 
-        <View style={styles.alertFooter}>
-          <Text style={styles.timestamp}>{formatTimestamp(item.timestamp)}</Text>
-          {isActive && (
-            <GlowButton
-              title="Mark Resolved"
-              onPress={() => handleResolve(item.id)}
-              size="sm"
-              variant="ghost"
-              textStyle={{ color: Colors.textMuted, fontSize: 12 }}
-            />
-          )}
-          {!isActive && (
-            <View style={styles.resolvedBadge}>
-              <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
-              <Text style={styles.resolvedText}>Resolved</Text>
-            </View>
-          )}
-        </View>
-      </GlassCard>
+          <View style={styles.alertFooter}>
+            <Text style={styles.timestamp}>{formatTimestamp(item.timestamp)}</Text>
+            {isActive && (
+              <GlowButton
+                title="Resolve"
+                onPress={() => handleResolve(item.id)}
+                size="sm"
+                variant="ghost"
+                textStyle={{ color: Colors.textMuted, fontSize: 12 }}
+              />
+            )}
+            {!isActive && (
+              <View style={styles.resolvedBadge}>
+                <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
+                <Text style={styles.resolvedText}>Resolved</Text>
+              </View>
+            )}
+          </View>
+        </GlassCard>
+      </TouchableOpacity>
     );
   };
 
@@ -167,20 +231,122 @@ const AlertsListScreen: React.FC = () => {
           <EmptyState3D
             icon="checkmark-done"
             title="All Clear"
-            subtitle={activeTab === 'active' ? 'No active alerts in your neighborhood' : 'No resolved alerts'}
+            subtitle={
+              activeTab === 'active'
+                ? 'No active alerts in your neighborhood'
+                : 'No resolved alerts'
+            }
           />
         }
       />
 
       {/* FAB Create Alert */}
-      <TouchableOpacity style={styles.fab} activeOpacity={0.85} onPress={() => navigation.navigate('CreateAlert')}>
-        <GlassCard
-          glowColor="rgba(255,68,68,0.4)"
-          style={styles.fabCard}
-        >
+      <TouchableOpacity
+        style={styles.fab}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('CreateAlert')}
+      >
+        <GlassCard glowColor="rgba(255,68,68,0.4)" style={styles.fabCard}>
           <Ionicons name="add" size={28} color={Colors.error} />
         </GlassCard>
       </TouchableOpacity>
+
+      {/* Alert Detail Modal */}
+      <GlassModal
+        visible={selectedAlert !== null}
+        onClose={() => setSelectedAlert(null)}
+        slideFrom="bottom"
+      >
+        {selectedAlert && (
+          <View style={styles.detailContainer}>
+            <View
+              style={[
+                styles.detailIconWrap,
+                {
+                  backgroundColor:
+                    (ALERT_TYPE_CONFIG[selectedAlert.type] || ALERT_TYPE_CONFIG.other).color +
+                    '20',
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  (ALERT_TYPE_CONFIG[selectedAlert.type] || ALERT_TYPE_CONFIG.other).icon
+                }
+                size={36}
+                color={
+                  (ALERT_TYPE_CONFIG[selectedAlert.type] || ALERT_TYPE_CONFIG.other).color
+                }
+              />
+            </View>
+            <Text style={styles.detailTitle}>{selectedAlert.title}</Text>
+            <View style={styles.detailStatusRow}>
+              {!selectedAlert.resolved ? (
+                <View style={styles.detailLiveBadge}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.detailLiveText}>Active</Text>
+                </View>
+              ) : (
+                <View style={styles.detailResolvedBadge}>
+                  <Ionicons name="checkmark-circle" size={14} color={Colors.success} />
+                  <Text style={styles.detailResolvedText}>Resolved</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.detailSection}>
+              <Text style={styles.detailLabel}>Description</Text>
+              <Text style={styles.detailValue}>{selectedAlert.description}</Text>
+            </View>
+
+            <View style={styles.detailSection}>
+              <Text style={styles.detailLabel}>Location</Text>
+              <View style={styles.detailLocationRow}>
+                <Ionicons name="location" size={16} color={Colors.accent} />
+                <Text style={styles.detailValue}>{selectedAlert.location}</Text>
+              </View>
+              {selectedAlert.latitude && selectedAlert.longitude && (
+                <Text style={styles.detailCoords}>
+                  {selectedAlert.latitude.toFixed(4)}, {selectedAlert.longitude.toFixed(4)}
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.detailInfoGrid}>
+              <View style={styles.detailInfoItem}>
+                <Text style={styles.detailInfoLabel}>Reported by</Text>
+                <Text style={styles.detailInfoValue}>
+                  {selectedAlert.reportedByName || 'Anonymous'}
+                </Text>
+              </View>
+              <View style={styles.detailInfoItem}>
+                <Text style={styles.detailInfoLabel}>Time</Text>
+                <Text style={styles.detailInfoValue}>
+                  {formatTimestamp(selectedAlert.timestamp)}
+                </Text>
+              </View>
+              {selectedAlert.resolvedAt && (
+                <View style={styles.detailInfoItem}>
+                  <Text style={styles.detailInfoLabel}>Resolved at</Text>
+                  <Text style={styles.detailInfoValue}>
+                    {formatTimestamp(selectedAlert.resolvedAt)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {!selectedAlert.resolved && (
+              <GlowButton
+                title="Mark as Resolved"
+                onPress={() => handleResolve(selectedAlert.id)}
+                variant="danger"
+                size="lg"
+                style={styles.resolveButton}
+              />
+            )}
+          </View>
+        )}
+      </GlassModal>
     </SafeAreaView>
   );
 };
@@ -273,7 +439,17 @@ const styles = StyleSheet.create({
   },
   alertCard: {
     marginBottom: 12,
-    borderColor: Colors.alertRed,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  dangerGlowBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: Colors.alertRed,
+    opacity: 0.8,
   },
   alertHeader: {
     flexDirection: 'row',
@@ -301,6 +477,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 4,
+    gap: 8,
+    flexWrap: 'wrap',
   },
   locationChip: {
     flexDirection: 'row',
@@ -314,6 +492,33 @@ const styles = StyleSheet.create({
   locationText: {
     color: Colors.textMuted,
     fontSize: 11,
+    fontFamily: 'Inter',
+  },
+  reportedByText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter',
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.alertRed + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 5,
+    marginLeft: 8,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.alertRed,
+  },
+  liveText: {
+    color: Colors.alertRed,
+    fontSize: 10,
+    fontWeight: '700',
     fontFamily: 'Inter',
   },
   alertDescription: {
@@ -362,7 +567,118 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 0,
   },
+
+  // Detail Modal
+  detailContainer: {
+    alignItems: 'center',
+    padding: 8,
+  },
+  detailIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  detailTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    fontFamily: 'Inter',
+    textAlign: 'center',
+  },
+  detailStatusRow: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  detailLiveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.alertRed + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    gap: 6,
+  },
+  detailLiveText: {
+    color: Colors.alertRed,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Inter',
+  },
+  detailResolvedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailResolvedText: {
+    color: Colors.success,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+  },
+  detailSection: {
+    width: '100%',
+    marginBottom: 14,
+  },
+  detailLabel: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailValue: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: 'Inter',
+    lineHeight: 20,
+  },
+  detailLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  detailCoords: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter',
+    marginTop: 4,
+    marginLeft: 22,
+  },
+  detailInfoGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    backgroundColor: Colors.glassBg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    padding: 12,
+    marginBottom: 16,
+    gap: 12,
+  },
+  detailInfoItem: {
+    width: '45%',
+  },
+  detailInfoLabel: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter',
+    marginBottom: 2,
+  },
+  detailInfoValue: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+  },
+  resolveButton: {
+    width: '100%',
+  },
 });
 
 export default AlertsListScreen;
-

@@ -12,14 +12,17 @@ import { StatusBar } from 'expo-status-bar';
 import { BlurView } from 'expo-blur';
 import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { geohashForLocation } from 'geofire-common';
 import Colors from '../../utils/colors';
 import { useAuth } from '../../context/AuthContext';
 import GlassCard from '../../components/glass/GlassCard';
 import GlowButton from '../../components/glass/GlowButton';
 import GlowInput from '../../components/glass/GlowInput';
 import { DARK_MAP_STYLE } from '../../services/maps';
+import { createVerificationRequest } from '../../services/dataService';
+import { enrichCoordinates } from '../../services/location';
 
-type StatusType = 'pending' | 'approved' | 'rejected';
+type StatusType = 'pending' | 'submitted' | 'approved' | 'rejected';
 
 const AddressVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user, updateUser } = useAuth();
@@ -91,25 +94,103 @@ const AddressVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }
     },
   ];
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!streetAddress.trim() || !area.trim() || !city.trim()) {
       setError('Please fill in your full address (street, area, and city)');
+      return;
+    }
+    if (!user?.uid) {
+      setError('User not found. Please try logging in again.');
       return;
     }
     setError('');
     setIsLoading(true);
 
-    // Submit for admin review — placeholder, navigates to main app
-    setTimeout(() => {
+    try {
+      // Enrich coordinates with geohash
+      const enriched = await enrichCoordinates(markerCoord.latitude, markerCoord.longitude);
+
+      // Create verification request in Firestore
+      const requestId = 'vr_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
+      await createVerificationRequest({
+        id: requestId,
+        userId: user.uid,
+        userName: user.name,
+        userPhone: user.phone || '',
+        userAvatar: user.avatar,
+        streetAddress: streetAddress.trim(),
+        area: area.trim(),
+        city: city.trim(),
+        latitude: enriched.latitude,
+        longitude: enriched.longitude,
+        geohash: enriched.geohash,
+        status: 'pending',
+        createdAt: Date.now(),
+      });
+
+      // Update user profile with address details
+      await updateUser({
+        streetName: streetAddress.trim(),
+        address: streetAddress.trim(),
+        area: area.trim(),
+        city: city.trim(),
+        latitude: enriched.latitude,
+        longitude: enriched.longitude,
+        geohash: enriched.geohash,
+      });
+
+      setStatus('submitted');
+    } catch (err: any) {
+      console.error('[AddressVerification] Submit failed:', err);
+      setError(err.message || 'Failed to submit verification. Please try again.');
+    } finally {
       setIsLoading(false);
-      setStatus('approved');
-    }, 1500);
+    }
   };
 
   const handleTryAgain = () => {
     setStatus('pending');
     setError('');
   };
+
+  // Submitted (pending review) State
+  if (status === 'submitted') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.statusCenter}>
+          <GlassCard
+            style={[styles.statusCard, { borderColor: Colors.warning }]}
+            glowColor={Colors.warning}
+          >
+            <View style={[styles.statusIconContainer, { borderColor: Colors.warning }]}>
+              <Ionicons name="time-outline" size={52} color={Colors.warning} />
+            </View>
+            <Text style={[styles.statusTitle, { color: Colors.warning }]}>
+              Pending Review
+            </Text>
+            <Text style={styles.statusDesc}>
+              Your address has been submitted for verification. Your neighborhood admin will
+              review it shortly. You'll receive a notification once it's approved.
+            </Text>
+            <Text style={[styles.statusDesc, { marginTop: 12, fontSize: 13, color: Colors.textMuted }]}>
+              You can browse the app while you wait, but posting and commenting will be
+              available after verification.
+            </Text>
+            <GlowButton
+              title="Browse Neighborhood"
+              onPress={() => {
+                // Navigate to MainTabs (read-only mode)
+                navigation.replace('MainTabs');
+              }}
+              gradientColors={[Colors.primary, Colors.accent]}
+              style={{ marginTop: 16, width: '100%' }}
+            />
+          </GlassCard>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Approved State
   if (status === 'approved') {
@@ -138,7 +219,7 @@ const AddressVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }
                   neighborhoodName: area || 'My Mohalla',
                   verified: true,
                 });
-                // Auth state change (isVerified -> true) navigates to MainTabs
+                navigation.replace('MainTabs');
               }}
               gradientColors={[Colors.success, Colors.accent]}
               style={{ marginTop: 16, width: '100%' }}

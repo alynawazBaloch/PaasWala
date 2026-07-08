@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,11 +18,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import GlassCard from '../../components/glass/GlassCard';
 import BounceButton from '../../components/animated/BounceButton';
 import AvatarBadge from '../../components/shared/AvatarBadge';
+import TappableAuthor from '../../components/shared/TappableAuthor';
 import CategoryChip from '../../components/shared/CategoryChip';
 import { SkeletonCard } from '../../components/shared/SkeletonGlass';
 import EmptyState3D from '../../components/shared/EmptyState3D';
 import StaggerList from '../../components/animated/StaggerList';
 import { useFeed, Post } from '../../hooks/useFeed';
+import { useAuth } from '../../context/AuthContext';
+import { listenStories, listenNotifications } from '../../services/dataService';
+import type { Story, NotificationItem } from '../../services/dataService';
 import Colors from '../../utils/colors';
 import { ROLE_BADGES } from '../../utils/constants';
 
@@ -36,23 +40,6 @@ const CATEGORY_FILTERS = [
   { label: 'Recommendations', key: 'recommendation' },
   { label: 'Appreciation', key: 'appreciation' },
   { label: 'Urgent', key: 'urgent' },
-];
-
-const STORY_USERS = [
-  { name: 'Your Story', isOwn: true },
-  { name: 'Aisha K.', avatar: '' },
-  { name: 'Imran A.', avatar: '' },
-  { name: 'Fatima H.', avatar: '' },
-  { name: 'Usman M.', avatar: '' },
-  { name: 'Zara B.', avatar: '' },
-  { name: 'Omar S.', avatar: '' },
-  { name: 'Sana T.', avatar: '' },
-];
-
-const MOCK_STORIES = [
-  { id: 's1', userName: 'Aisha K.', userAvatar: '', userRole: 'resident', timestamp: Date.now() - 1800000 },
-  { id: 's2', userName: 'Imran A.', userAvatar: '', userRole: 'admin', timestamp: Date.now() - 3600000 },
-  { id: 's3', userName: 'Fatima H.', userAvatar: '', userRole: 'resident', timestamp: Date.now() - 7200000 },
 ];
 
 const formatRelativeTime = (timestamp: number): string => {
@@ -71,11 +58,27 @@ const formatRelativeTime = (timestamp: number): string => {
 
 const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { posts, loading, refreshing, refresh, likePost } = useFeed();
+  const { user, isVerified } = useAuth();
+  const { posts, loading, refreshing, refresh, likePost, feedRadius, nearbyPostCount } = useFeed();
   const [activeCategory, setActiveCategory] = useState('all');
   const [scrolled, setScrolled] = useState(false);
   const [showNewPostsPill, setShowNewPostsPill] = useState(false);
+  const [stories, setStories] = useState<Story[]>([]);
   const flatListRef = useRef<FlatList>(null);
+
+  // Real-time story listener
+  useEffect(() => {
+    return listenStories(setStories);
+  }, []);
+
+  // Real-time notification badge
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  useEffect(() => {
+    if (!user?.uid) return;
+    return listenNotifications(user.uid, (items) => {
+      setUnreadNotifCount(items.filter((n) => n.isUnread).length);
+    });
+  }, [user?.uid]);
 
   const handleScroll = useCallback((event: any) => {
     const offsetY = event.nativeEvent.contentOffset.y;
@@ -84,30 +87,7 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   }, []);
 
   const handleAddStory = useCallback(async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'We need camera roll access to add a story.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const newStory = {
-          id: 'my_story_' + Date.now(),
-          userName: 'Your Story',
-          userAvatar: '',
-          userRole: 'resident',
-          mediaUrl: result.assets[0].uri,
-          timestamp: Date.now(),
-        };
-        navigation?.navigate('StoryViewer', { stories: [newStory, ...MOCK_STORIES], initialIndex: 0 });
-      }
-    } catch (err) {
-      console.error('[FeedScreen] Story picker error:', err);
-    }
+    navigation?.navigate('StoryComposer');
   }, [navigation]);
 
   const scrollToTop = useCallback(() => {
@@ -115,59 +95,68 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
     setShowNewPostsPill(false);
   }, []);
 
-  const renderStoryItem = (story: typeof STORY_USERS[0], index: number) => {
-    const seen = index > 2;
+  const renderStoryItem = (story: Story, index: number, isOwn: boolean) => {
+    const seen = isOwn ? false : story.viewerIds?.includes(user?.uid || '');
     const ringColor = seen ? Colors.textMuted : Colors.accent;
-    const isOwnStory = story.isOwn;
 
     return (
       <TouchableOpacity
-        key={index}
+        key={story.id}
         activeOpacity={0.7}
         style={styles.storyItem}
-        onPress={() => isOwnStory ? handleAddStory() : navigation?.navigate('StoryViewer', { stories: MOCK_STORIES, initialIndex: index - 1 })}
+        onPress={() => {
+          if (isOwn) handleAddStory();
+          else navigation?.navigate('StoryViewer', { stories, initialIndex: index });
+        }}
       >
-        <View
-          style={[
-            styles.storyRing,
-            {
-              borderColor: ringColor,
-              borderWidth: seen ? 2 : 2.5,
-            },
-          ]}
-        >
-          {isOwnStory ? (
+        <View style={[styles.storyRing, { borderColor: ringColor, borderWidth: seen ? 2 : 2.5 }]}>
+          {isOwn ? (
             <View style={[styles.storyAvatar, styles.ownStoryAvatar]}>
               <Ionicons name="add" size={28} color={Colors.accent} />
             </View>
           ) : (
             <AvatarBadge
-              name={story.name}
-              avatar={story.avatar || undefined}
+              name={story.authorName}
+              avatar={story.authorAvatar}
               size={STORY_SIZE - 6}
-              role="resident"
+              role={story.authorRole as any}
               verified={false}
             />
           )}
         </View>
         <Text style={styles.storyLabel} numberOfLines={1}>
-          {isOwnStory ? 'Add Story' : story.name.split(' ')[0]}
+          {isOwn ? 'Add Story' : story.authorName.split(' ')[0]}
         </Text>
       </TouchableOpacity>
     );
   };
 
-  const renderStoryRow = () => (
-    <View style={styles.storiesSection}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.storiesContainer}
-      >
-        {STORY_USERS.map((story, index) => renderStoryItem(story, index))}
-      </ScrollView>
-    </View>
-  );
+  const renderStoryRow = () => {
+    // Deduplicate stories by author — show newest per author
+    const seenAuthors = new Set<string>();
+    const uniqueStories: Story[] = [];
+    for (const s of stories) {
+      if (!seenAuthors.has(s.authorId)) {
+        seenAuthors.add(s.authorId);
+        uniqueStories.push(s);
+      }
+    }
+    const hasOwnActiveStory = stories.some((s) => s.authorId === user?.uid);
+
+    return (
+      <View style={styles.storiesSection}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesContainer}>
+          {/* Own story (always first) */}
+          {renderStoryItem(
+            { id: 'own_story', authorId: user?.uid || '', authorName: user?.name || 'You', authorAvatar: user?.avatar, authorRole: 'resident', type: 'photo', viewerIds: [], createdAt: Date.now(), expiresAt: Date.now() + 86400000 } as Story,
+            -1,
+            true
+          )}
+          {uniqueStories.filter((s) => s.authorId !== user?.uid).map((story, idx) => renderStoryItem(story, idx, false))}
+        </ScrollView>
+      </View>
+    );
+  };
 
   const renderFilterChips = () => (
     <View style={styles.filterSection}>
@@ -205,49 +194,19 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
         glowColor={item.category === 'urgent' ? Colors.error : Colors.glassBorder}
         onPress={() => navigation?.navigate('PostDetail', { post: item })}
       >
-        {/* Author Row */}
-        <View style={styles.postAuthorRow}>
-          <View style={styles.postAuthorLeft}>
-            <AvatarBadge
-              name={item.authorName}
-              avatar={item.authorAvatar || undefined}
-              size={40}
-              role={roleKey}
-              verified={item.verified}
-            />
-            <View style={styles.postAuthorInfo}>
-              <View style={styles.postAuthorNameRow}>
-                <Text style={styles.postAuthorName}>{item.authorName}</Text>
-                {item.verified && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={roleBadge.color}
-                    style={{ marginLeft: 4 }}
-                  />
-                )}
-                {roleKey !== 'resident' && (
-                  <View style={[styles.rolePill, { backgroundColor: roleBadge.color + '30' }]}>
-                    <Text style={[styles.rolePillText, { color: roleBadge.color }]}>
-                      {roleBadge.label}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.postMetaRow}>
-                <Ionicons name="location-outline" size={12} color={Colors.textMuted} />
-                <Text style={styles.postStreet}>{item.street}</Text>
-                <Text style={styles.postDot}> &middot; </Text>
-                <Text style={styles.postTimestamp}>{formatRelativeTime(item.timestamp)}</Text>
-              </View>
-            </View>
-          </View>
-          {item.audience === 'neighborhood' && (
-            <View style={styles.audienceBadge}>
-              <Ionicons name="people" size={12} color={Colors.accent} />
-            </View>
-          )}
-        </View>
+        {/* Author Row — tappable */}
+        <TappableAuthor
+          userId={item.authorId}
+          name={item.authorName}
+          avatar={item.authorAvatar}
+          role={roleKey}
+          verified={item.verified}
+          size={40}
+          showStreet
+          street={item.street}
+          showTimestamp
+          timestamp={item.timestamp}
+        />
 
         {/* Category Tag */}
         <View style={styles.postCategoryRow}>
@@ -346,8 +305,56 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
     );
   };
 
+  const renderVerificationBanner = () => {
+    if (isVerified) return null;
+    return (
+      <TouchableOpacity
+        style={styles.verificationBanner}
+        activeOpacity={0.8}
+        onPress={() => navigation?.replace('AddressVerification')}
+      >
+        <View style={styles.verificationBannerIcon}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={Colors.warning} />
+        </View>
+        <View style={styles.verificationBannerText}>
+          <Text style={styles.verificationBannerTitle}>Verify Your Address</Text>
+          <Text style={styles.verificationBannerDesc}>
+            Browse in read-only mode. Verify to post and comment.
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={Colors.warning} />
+      </TouchableOpacity>
+    );
+  };
+
+  const renderSmartIndicator = () => {
+    if (feedRadius === 'expanded') {
+      return (
+        <View style={styles.smartIndicator}>
+          <Ionicons name="compass-outline" size={14} color={Colors.accent} />
+          <Text style={styles.smartIndicatorText}>
+            Showing posts from nearby neighborhoods ({nearbyPostCount} local, {posts.length} total)
+          </Text>
+        </View>
+      );
+    }
+    if (feedRadius === 'neighborhood' && nearbyPostCount > 0) {
+      return (
+        <View style={[styles.smartIndicator, styles.smartIndicatorLocal]}>
+          <Ionicons name="home-outline" size={14} color={Colors.primary} />
+          <Text style={[styles.smartIndicatorText, { color: Colors.primary }]}>
+            Your neighborhood is buzzing! {nearbyPostCount} posts
+          </Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
   const renderHeader = () => (
     <View>
+      {renderVerificationBanner()}
+      {renderSmartIndicator()}
       {renderStoryRow()}
       {renderFilterChips()}
     </View>
@@ -380,10 +387,17 @@ const FeedScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
           </View>
         </View>
         <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7} onPress={() => navigation?.navigate('NearbyNeighbors')}>
+            <Ionicons name="people-outline" size={22} color={Colors.textSecondary} />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7} onPress={() => navigation?.navigate('Notifications')}>
             <View style={styles.iconBadgeWrapper}>
               <Ionicons name="notifications-outline" size={24} color={Colors.textPrimary} />
-              <View style={styles.badgeDot} />
+              {unreadNotifCount > 0 && (
+                <View style={[styles.badgeDot, styles.badgeCount]}>
+                  <Text style={styles.badgeCountText}>{unreadNotifCount > 99 ? '99+' : unreadNotifCount}</Text>
+                </View>
+              )}
             </View>
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} activeOpacity={0.7} onPress={() => navigation?.navigate('Messages')}>
@@ -534,6 +548,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
     fontFamily: 'Inter',
+  },
+
+  // Verification banner
+  verificationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,215,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.25)',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    gap: 10,
+  },
+  verificationBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,215,0,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verificationBannerText: {
+    flex: 1,
+  },
+  verificationBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.warning,
+    fontFamily: 'Inter',
+  },
+  verificationBannerDesc: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontFamily: 'Inter',
+    marginTop: 2,
   },
 
   // Stories
@@ -760,6 +813,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: Colors.textPrimary,
+    fontFamily: 'Inter',
+  },
+  smartIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(82,183,136,0.08)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(82,183,136,0.2)',
+    alignSelf: 'flex-start',
+  },
+  smartIndicatorLocal: {
+    backgroundColor: 'rgba(45,106,79,0.08)',
+    borderColor: 'rgba(45,106,79,0.2)',
+  },
+  smartIndicatorText: {
+    fontSize: 12,
+    color: Colors.accent,
+    fontWeight: '500',
     fontFamily: 'Inter',
   },
   loadingContainer: {

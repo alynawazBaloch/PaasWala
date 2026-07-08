@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ import { savePost } from '../../services/dataService';
 import { useAuth } from '../../context/AuthContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const MAX_CHARS = 1000;
+const MAX_CHARS = 500;
 
 const CATEGORY_OPTIONS = [
   { label: 'General', key: 'general', icon: 'document-text' as const },
@@ -34,6 +34,12 @@ const CATEGORY_OPTIONS = [
   { label: 'Recommendation', key: 'recommendation', icon: 'star' as const },
   { label: 'Appreciation', key: 'appreciation', icon: 'heart' as const },
   { label: 'Urgent', key: 'urgent', icon: 'warning' as const },
+  { label: 'Safety', key: 'safety', icon: 'shield-checkmark' as const },
+  { label: 'News', key: 'news', icon: 'newspaper' as const },
+  { label: 'Sale', key: 'sale', icon: 'pricetag' as const },
+  { label: 'Event', key: 'event', icon: 'calendar' as const },
+  { label: 'Lost & Found', key: 'lost_found', icon: 'search' as const },
+  { label: 'Alert', key: 'alert', icon: 'alert-circle' as const },
 ];
 
 const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
@@ -41,7 +47,7 @@ const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
   route,
 }) => {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, isVerified } = useAuth();
   const [content, setContent] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('general');
   const [audience, setAudience] = useState<'public' | 'neighborhood'>('neighborhood');
@@ -52,6 +58,17 @@ const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
 
   const charsRemaining = MAX_CHARS - content.length;
   const isValid = content.trim().length > 0 && charsRemaining >= 0;
+
+  // Gate: unverified users cannot post
+  useEffect(() => {
+    if (!isVerified) {
+      Alert.alert(
+        'Verification Required',
+        'Please verify your address before posting in the neighborhood.',
+        [{ text: 'OK', onPress: () => navigation?.goBack() }]
+      );
+    }
+  }, []);
 
   const handleShare = useCallback(async () => {
     if (!isValid || isSubmitting) return;
@@ -65,6 +82,8 @@ const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
       authorRole: user?.role ?? 'resident',
       verified: user?.verified ?? false,
       street: user?.streetName ?? '',
+      neighborhoodId: user?.neighborhoodId ?? undefined,
+      neighborhoodName: user?.neighborhoodName ?? undefined,
       content: content.trim(),
       media: mediaAttachments,
       category: selectedCategory,
@@ -87,23 +106,32 @@ const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
 
   const pickImage = useCallback(async () => {
     try {
+      if (mediaAttachments.length >= 10) {
+        Alert.alert('Limit Reached', 'You can attach up to 10 photos per post.');
+        return;
+      }
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'We need camera roll access to attach media.');
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
         allowsMultipleSelection: true,
       });
       if (!result.canceled && result.assets.length > 0) {
-        setMediaAttachments(prev => [...prev, ...result.assets.map(a => a.uri)]);
+        const remaining = 10 - mediaAttachments.length;
+        const newUris = result.assets.slice(0, remaining).map(a => a.uri);
+        setMediaAttachments(prev => [...prev, ...newUris]);
+        if (result.assets.length > remaining) {
+          Alert.alert('Limit Reached', `Only ${remaining} more photo${remaining > 1 ? 's' : ''} could be added.`);
+        }
       }
     } catch (err) {
       console.error('[PostComposer] Image picker error:', err);
     }
-  }, []);
+  }, [mediaAttachments.length]);
 
   const pickCamera = useCallback(async () => {
     try {

@@ -20,7 +20,7 @@ import CategoryChip from '../../components/shared/CategoryChip';
 import EmptyState3D from '../../components/shared/EmptyState3D';
 import Colors from '../../utils/colors';
 import { formatTimestamp } from '../../utils/helpers';
-import { getListings } from '../../services/dataService';
+import { getListings, listenListings } from '../../services/dataService';
 import type { Listing } from '../../services/dataService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -44,14 +44,11 @@ const MarketplaceListScreen: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState('All');
 
   useEffect(() => {
-    loadListings();
+    const unsub = listenListings((all) => {
+      setListings(all.sort((a, b) => b.timestamp - a.timestamp));
+    });
+    return unsub;
   }, []);
-
-  const loadListings = async () => {
-    const all = await getListings();
-    all.sort((a, b) => b.timestamp - a.timestamp);
-    setListings(all);
-  };
 
   const filteredListings = listings.filter((listing) => {
     const matchesSearch = listing.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -164,7 +161,7 @@ const MarketplaceListScreen: React.FC = () => {
       />
 
       {/* FAB Create Listing */}
-      <TouchableOpacity style={styles.fab} activeOpacity={0.85} onPress={() => Alert.alert('Coming Soon', 'Listing creation coming soon.')}>
+      <TouchableOpacity style={styles.fab} activeOpacity={0.85} onPress={() => navigation.navigate('CreateListing')}>
         <GlassCard
           glowColor="rgba(82,183,136,0.4)"
           style={styles.fabCard}

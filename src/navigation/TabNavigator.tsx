@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,6 +10,8 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import Colors from '../utils/colors';
+import { useAuth } from '../context/AuthContext';
+import { useChat } from '../hooks/useChat';
 import FeedScreen from '../screens/feed/FeedScreen';
 import MapScreen from '../screens/map/MapScreen';
 import AlertsListScreen from '../screens/alerts/AlertsListScreen';
@@ -74,7 +76,8 @@ const TabItem: React.FC<{
   index: number;
   state: any;
   navigation: any;
-}> = ({ route, index, state, navigation }) => {
+  badgeCount?: number;
+}> = ({ route, index, state, navigation, badgeCount }) => {
   const isFocused = state.index === index;
   const iconScale = useSharedValue(isFocused ? 1 : 0.85);
 
@@ -114,11 +117,18 @@ const TabItem: React.FC<{
       activeOpacity={0.7}
     >
       <Animated.View style={[styles.tabIconContainer, animatedIconStyle]}>
-        <Ionicons
-          name={iconName}
-          size={24}
-          color={isFocused ? Colors.accent : Colors.textSecondary}
-        />
+        <View>
+          <Ionicons
+            name={iconName}
+            size={24}
+            color={isFocused ? Colors.accent : Colors.textSecondary}
+          />
+          {badgeCount != null && badgeCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badgeCount > 99 ? '99+' : badgeCount}</Text>
+            </View>
+          )}
+        </View>
         <ActiveTabIndicator isFocused={isFocused} />
       </Animated.View>
       {isFocused && <Text style={styles.tabLabel}>{label}</Text>}
@@ -134,6 +144,28 @@ const CustomTabBar: React.FC<{
   descriptors: any;
   navigation: any;
 }> = ({ state, navigation }) => {
+  const { isVerified } = useAuth();
+  const { chats } = useChat();
+  const totalUnread = useMemo(
+    () => chats.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+    [chats]
+  );
+
+  const handleFabPress = () => {
+    if (isVerified) {
+      navigation.navigate('PostComposer');
+    } else {
+      Alert.alert(
+        'Address Verification Required',
+        'Please verify your address before you can post in the neighborhood. Tap the banner on your feed to get started.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Verify Now', onPress: () => navigation.navigate('AddressVerification') },
+        ]
+      );
+    }
+  };
+
   return (
     <View style={styles.tabBarContainer}>
       <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
@@ -152,7 +184,7 @@ const CustomTabBar: React.FC<{
         {/* Center FAB -- raised emerald gradient circle */}
         <TouchableOpacity
           style={styles.centerFab}
-          onPress={() => navigation.navigate('PostComposer')}
+          onPress={handleFabPress}
           activeOpacity={0.8}
         >
           <LinearGradient
@@ -164,7 +196,7 @@ const CustomTabBar: React.FC<{
           <Ionicons name="add" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
 
-        {/* Last two tabs: Alerts, Profile */}
+        {/* Last three tabs: Alerts, Profile, Messages */}
         {state.routes.slice(2).map((route: any, index: number) => (
           <TabItem
             key={route.key}
@@ -172,6 +204,7 @@ const CustomTabBar: React.FC<{
             index={index + 2}
             state={state}
             navigation={navigation}
+            badgeCount={route.name === 'Messages' ? totalUnread : undefined}
           />
         ))}
       </View>
@@ -250,6 +283,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     marginTop: 1,
   },
+  badge: {
+    position: 'absolute', top: -4, right: -8, minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', fontFamily: 'Inter' },
   centerFab: {
     width: 52,
     height: 52,

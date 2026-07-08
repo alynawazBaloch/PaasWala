@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import {
   View,
@@ -21,7 +21,8 @@ import AvatarBadge from '../../components/shared/AvatarBadge';
 import EmptyState3D from '../../components/shared/EmptyState3D';
 import Colors from '../../utils/colors';
 import { formatTimestamp } from '../../utils/helpers';
-import { getEvents } from '../../services/dataService';
+import { useAuth } from '../../context/AuthContext';
+import { getEvents, listenEvents, updateRsvp } from '../../services/dataService';
 import type { Event as PSEvent } from '../../services/dataService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -31,37 +32,52 @@ const MAX_VISIBLE_AVATARS = 4;
 const EventsListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
-  const [upcomingEvents, setUpcomingEvents] = useState<PSEvent[]>([]);
-  const [pastEvents, setPastEvents] = useState<PSEvent[]>([]);
   const [events, setEvents] = useState<PSEvent[]>([]);
 
-  const currentEvents = activeTab === 'upcoming' ? upcomingEvents : pastEvents;
-
   useEffect(() => {
-    loadEvents();
+    const unsub = listenEvents((all) => {
+      setEvents(all);
+    });
+    return unsub;
   }, []);
 
-  const loadEvents = async () => {
-    const all = await getEvents();
-    // Upcoming = rsvp is null (or future events), past = rsvp null but dated
-    // Actually just split: first 4 as upcoming, rest as past
-    const upcoming = all.filter(e => e.rsvp !== null || !e.date.includes('Mar'));
-    const past = all.filter(e => e.date.includes('Mar'));
-    setUpcomingEvents(upcoming.length > 0 ? upcoming : all.slice(0, 4));
-    setPastEvents(past.length > 0 ? past : []);
-  };
+  const upcomingEvents = useMemo(
+    () => events.filter((e) => !e.createdAt || e.createdAt >= Date.now() - 86400000 * 30),
+    [events]
+  );
+  const pastEvents = useMemo(
+    () => events.filter((e) => e.createdAt && e.createdAt < Date.now() - 86400000 * 30),
+    [events]
+  );
+  const currentEvents = activeTab === 'upcoming' ? upcomingEvents : pastEvents;
 
-  const handleRsvp = (eventId: string, status: 'going' | 'interested') => {
-    setEvents((prev) =>
-      prev.map((e) => {
-        if (e.id === eventId) {
-          return { ...e, rsvp: e.rsvp === status ? null : status };
-        }
-        return e;
-      })
-    );
-  };
+  const handleRsvp = useCallback(
+    async (eventId: string, status: 'going' | 'interested') => {
+      if (!user?.uid || !user?.name) return;
+      const currentStatus = events.find((e) => e.id === eventId)?.rsvp;
+      const newStatus = currentStatus === status ? null : status;
+      await updateRsvp(eventId, user.uid, user.name, newStatus, user.avatar);
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventId
+            ? {
+                ...e,
+                rsvp: newStatus,
+                attendeeCount:
+                  newStatus === null
+                    ? Math.max(0, e.attendeeCount - 1)
+                    : currentStatus === null
+                    ? e.attendeeCount + 1
+                    : e.attendeeCount,
+              }
+            : e
+        )
+      );
+    },
+    [user?.uid, user?.name, user?.avatar, events]
+  );
 
   const renderEventCard = ({ item }: { item: PSEvent }) => (
     <SpringCard onPress={() => navigation.navigate('EventDetail', { event: item })}>

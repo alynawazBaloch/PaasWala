@@ -15,6 +15,7 @@ import Colors from '../../utils/colors';
 import GlassCard from '../../components/glass/GlassCard';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface SettingsScreenProps {
   navigation: any;
@@ -55,17 +56,73 @@ const SettingRow: React.FC<SettingRowProps> = ({
   </TouchableOpacity>
 );
 
+const CustomToggle: React.FC<{
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}> = ({ value, onValueChange }) => (
+  <TouchableOpacity
+    activeOpacity={0.8}
+    onPress={() => onValueChange(!value)}
+    style={[
+      styles.customToggle,
+      { backgroundColor: value ? Colors.accent : Colors.glassBorder },
+    ]}
+  >
+    <View
+      style={[
+        styles.customToggleKnob,
+        { alignSelf: value ? 'flex-end' : 'flex-start' },
+      ]}
+    />
+  </TouchableOpacity>
+);
+
+const PillButton: React.FC<{
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}> = ({ label, selected, onPress }) => (
+  <TouchableOpacity
+    activeOpacity={0.7}
+    onPress={onPress}
+    style={[
+      styles.pillButton,
+      selected
+        ? styles.pillButtonSelected
+        : styles.pillButtonUnselected,
+    ]}
+  >
+    <Text
+      style={[
+        styles.pillButtonText,
+        selected
+          ? styles.pillButtonTextSelected
+          : styles.pillButtonTextUnselected,
+      ]}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
 const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { isDark, toggleTheme } = useTheme();
   const { language, setLanguage } = useLanguage();
+  const { user, updateUser } = useAuth();
 
-  const [showOnlineStatus, setShowOnlineStatus] = useState(true);
-  const [likesPrivacy, setLikesPrivacy] = useState<'public' | 'neighborhood' | 'private'>('neighborhood');
-  const [pushNewPosts, setPushNewPosts] = useState(true);
-  const [pushMessages, setPushMessages] = useState(true);
-  const [pushEvents, setPushEvents] = useState(false);
-  const [pushAlerts, setPushAlerts] = useState(true);
+  const [searchableByEmail, setSearchableByEmail] = useState(user?.searchableByEmail ?? true);
+  const [showOnlineStatus, setShowOnlineStatus] = useState(user?.showOnlineStatus ?? true);
+  const [likesPrivacy, setLikesPrivacy] = useState<'public' | 'neighborhood' | 'private'>(user?.likesPrivacyDefault ?? 'neighborhood');
+  const [pushNewPosts, setPushNewPosts] = useState(user?.notificationPreferences?.newPosts ?? true);
+  const [pushMessages, setPushMessages] = useState(user?.notificationPreferences?.messages ?? true);
+  const [pushEvents, setPushEvents] = useState(user?.notificationPreferences?.events ?? false);
+  const [pushAlerts, setPushAlerts] = useState(user?.notificationPreferences?.alerts ?? true);
+
+  // New privacy states
+  const [whoCanMessage, setWhoCanMessage] = useState(user?.whoCanMessage ?? 'everyone');
+  const [postVisibility, setPostVisibility] = useState(user?.postVisibility ?? 'neighborhood');
+  const [showLocationOnMap, setShowLocationOnMap] = useState(user?.showLocationOnMap ?? true);
 
   const handleChangePassword = useCallback(() => {
     Alert.alert('Change Password', 'Password change functionality coming soon.');
@@ -96,6 +153,52 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
     const next = options[(currentIndex + 1) % options.length];
     setLikesPrivacy(next);
   }, [likesPrivacy]);
+
+  const handleToggleSearchableByEmail = useCallback((value: boolean) => {
+    setSearchableByEmail(value);
+    updateUser({ searchableByEmail: value });
+  }, [updateUser]);
+
+  const handleToggleOnlineStatus = useCallback((value: boolean) => {
+    setShowOnlineStatus(value);
+    updateUser({ showOnlineStatus: value });
+  }, [updateUser]);
+
+  const handleTogglePushNewPosts = useCallback((value: boolean) => {
+    setPushNewPosts(value);
+    updateUser({ notificationPreferences: { ...user?.notificationPreferences, newPosts: value } });
+  }, [updateUser, user]);
+
+  const handleTogglePushMessages = useCallback((value: boolean) => {
+    setPushMessages(value);
+    updateUser({ notificationPreferences: { ...user?.notificationPreferences, messages: value } });
+  }, [updateUser, user]);
+
+  const handleTogglePushEvents = useCallback((value: boolean) => {
+    setPushEvents(value);
+    updateUser({ notificationPreferences: { ...user?.notificationPreferences, events: value } });
+  }, [updateUser, user]);
+
+  const handleTogglePushAlerts = useCallback((value: boolean) => {
+    setPushAlerts(value);
+    updateUser({ notificationPreferences: { ...user?.notificationPreferences, alerts: value } });
+  }, [updateUser, user]);
+
+  // New privacy handlers
+  const handleWhoCanMessage = useCallback((value: 'everyone' | 'friends' | 'nobody') => {
+    setWhoCanMessage(value);
+    updateUser({ whoCanMessage: value });
+  }, [updateUser]);
+
+  const handlePostVisibility = useCallback((value: 'neighborhood' | 'friends') => {
+    setPostVisibility(value);
+    updateUser({ postVisibility: value });
+  }, [updateUser]);
+
+  const handleToggleLocationOnMap = useCallback((value: boolean) => {
+    setShowLocationOnMap(value);
+    updateUser({ showLocationOnMap: value });
+  }, [updateUser]);
 
   const getLikesPrivacyLabel = (privacy: 'public' | 'neighborhood' | 'private') => {
     switch (privacy) {
@@ -152,20 +255,98 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Privacy</Text>
           <GlassCard noTouch style={styles.sectionCard}>
+            {/* Who can message me */}
+            <View style={[styles.settingRow, styles.settingRowBorder]}>
+              <View style={styles.settingRowLeft}>
+                <View style={[styles.settingIcon, { borderColor: Colors.accent + '40' }]}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={20} color={Colors.accent} />
+                </View>
+                <Text style={styles.settingLabel}>Who can message me</Text>
+              </View>
+            </View>
+            <View style={[styles.pillRow, styles.settingRowBorder]}>
+              <PillButton
+                label="Everyone"
+                selected={whoCanMessage === 'everyone'}
+                onPress={() => handleWhoCanMessage('everyone')}
+              />
+              <PillButton
+                label="Friends Only"
+                selected={whoCanMessage === 'friends'}
+                onPress={() => handleWhoCanMessage('friends')}
+              />
+              <PillButton
+                label="Nobody"
+                selected={whoCanMessage === 'nobody'}
+                onPress={() => handleWhoCanMessage('nobody')}
+              />
+            </View>
+
+            {/* Post visibility */}
             <View style={[styles.settingRow, styles.settingRowBorder]}>
               <View style={styles.settingRowLeft}>
                 <View style={[styles.settingIcon, { borderColor: Colors.accent + '40' }]}>
                   <Ionicons name="eye-outline" size={20} color={Colors.accent} />
                 </View>
-                <Text style={styles.settingLabel}>Show Online Status</Text>
+                <Text style={styles.settingLabel}>Post visibility</Text>
               </View>
-              <Switch
-                value={showOnlineStatus}
-                onValueChange={setShowOnlineStatus}
-                trackColor={{ false: Colors.glassBorder, true: Colors.primary }}
-                thumbColor={showOnlineStatus ? Colors.accent : Colors.textMuted}
+            </View>
+            <View style={[styles.pillRow, styles.settingRowBorder]}>
+              <PillButton
+                label="Neighborhood"
+                selected={postVisibility === 'neighborhood'}
+                onPress={() => handlePostVisibility('neighborhood')}
+              />
+              <PillButton
+                label="Friends Only"
+                selected={postVisibility === 'friends'}
+                onPress={() => handlePostVisibility('friends')}
               />
             </View>
+
+            {/* Show my location on map */}
+            <View style={[styles.settingRow, styles.settingRowBorder]}>
+              <View style={styles.settingRowLeft}>
+                <View style={[styles.settingIcon, { borderColor: Colors.accent + '40' }]}>
+                  <Ionicons name="location-outline" size={20} color={Colors.accent} />
+                </View>
+                <Text style={styles.settingLabel}>Show my location on map</Text>
+              </View>
+              <CustomToggle
+                value={showLocationOnMap}
+                onValueChange={handleToggleLocationOnMap}
+              />
+            </View>
+
+            {/* Show online status (existing) */}
+            <View style={[styles.settingRow, styles.settingRowBorder]}>
+              <View style={styles.settingRowLeft}>
+                <View style={[styles.settingIcon, { borderColor: Colors.accent + '40' }]}>
+                  <Ionicons name="globe-outline" size={20} color={Colors.accent} />
+                </View>
+                <Text style={styles.settingLabel}>Show Online Status</Text>
+              </View>
+              <CustomToggle
+                value={showOnlineStatus}
+                onValueChange={handleToggleOnlineStatus}
+              />
+            </View>
+
+            {/* Searchable by email (existing) */}
+            <View style={[styles.settingRow, styles.settingRowBorder]}>
+              <View style={styles.settingRowLeft}>
+                <View style={[styles.settingIcon, { borderColor: Colors.accent + '40' }]}>
+                  <Ionicons name="search-outline" size={20} color={Colors.accent} />
+                </View>
+                <Text style={styles.settingLabel}>Allow others to find me by email</Text>
+              </View>
+              <CustomToggle
+                value={searchableByEmail}
+                onValueChange={handleToggleSearchableByEmail}
+              />
+            </View>
+
+            {/* Likes Privacy (existing) */}
             <SettingRow
               icon="heart-outline"
               label="Likes Privacy"
@@ -183,6 +364,45 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
           </GlassCard>
         </View>
 
+        {/* Your Data */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Your Data</Text>
+          <GlassCard noTouch style={styles.sectionCard}>
+            <View style={styles.dataInfoContainer}>
+              <View style={styles.dataInfoIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={32} color={Colors.accent} />
+              </View>
+              <Text style={styles.dataInfoTitle}>Your information is protected</Text>
+              <View style={styles.dataInfoBullets}>
+                <View style={styles.dataInfoBullet}>
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                  <Text style={styles.dataInfoBulletText}>
+                    Your full address is never shown publicly, only your street name
+                  </Text>
+                </View>
+                <View style={styles.dataInfoBullet}>
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                  <Text style={styles.dataInfoBulletText}>
+                    Phone number is never shared publicly
+                  </Text>
+                </View>
+                <View style={styles.dataInfoBullet}>
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                  <Text style={styles.dataInfoBulletText}>
+                    Email is only shared when you enable email search
+                  </Text>
+                </View>
+                <View style={styles.dataInfoBullet}>
+                  <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                  <Text style={styles.dataInfoBulletText}>
+                    Blocked users have zero visibility into your content
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </GlassCard>
+        </View>
+
         {/* Notifications */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Notifications</Text>
@@ -196,7 +416,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
               </View>
               <Switch
                 value={pushNewPosts}
-                onValueChange={setPushNewPosts}
+                onValueChange={handleTogglePushNewPosts}
                 trackColor={{ false: Colors.glassBorder, true: Colors.primary }}
                 thumbColor={pushNewPosts ? Colors.accent : Colors.textMuted}
               />
@@ -210,7 +430,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
               </View>
               <Switch
                 value={pushMessages}
-                onValueChange={setPushMessages}
+                onValueChange={handleTogglePushMessages}
                 trackColor={{ false: Colors.glassBorder, true: Colors.primary }}
                 thumbColor={pushMessages ? Colors.accent : Colors.textMuted}
               />
@@ -224,7 +444,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
               </View>
               <Switch
                 value={pushEvents}
-                onValueChange={setPushEvents}
+                onValueChange={handleTogglePushEvents}
                 trackColor={{ false: Colors.glassBorder, true: Colors.primary }}
                 thumbColor={pushEvents ? Colors.accent : Colors.textMuted}
               />
@@ -238,7 +458,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
               </View>
               <Switch
                 value={pushAlerts}
-                onValueChange={setPushAlerts}
+                onValueChange={handleTogglePushAlerts}
                 trackColor={{ false: Colors.glassBorder, true: Colors.primary }}
                 thumbColor={pushAlerts ? Colors.accent : Colors.textMuted}
               />
@@ -410,6 +630,55 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  // Pill Button
+  pillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  pillButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+  },
+  pillButtonSelected: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  pillButtonUnselected: {
+    backgroundColor: 'transparent',
+    borderColor: Colors.glassBorder,
+  },
+  pillButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+  },
+  pillButtonTextSelected: {
+    color: Colors.textPrimary,
+  },
+  pillButtonTextUnselected: {
+    color: Colors.textMuted,
+  },
+
+  // Custom Toggle
+  customToggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  customToggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+
   // Badges
   privacyBadge: {
     backgroundColor: Colors.glassBg,
@@ -444,6 +713,50 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontFamily: 'Inter',
   },
+
+  // Data Security
+  dataInfoContainer: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  dataInfoIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.glassBg,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  dataInfoTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    fontFamily: 'Inter',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  dataInfoBullets: {
+    width: '100%',
+    gap: 10,
+  },
+  dataInfoBullet: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  dataInfoBulletText: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: Colors.textSecondary,
+    fontFamily: 'Inter',
+    flex: 1,
+    lineHeight: 18,
+  },
+
   bottomSpacer: {
     height: 40,
   },

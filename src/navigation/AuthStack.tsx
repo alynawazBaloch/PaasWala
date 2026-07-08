@@ -5,7 +5,6 @@ import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import OTPScreen from '../screens/auth/OTPScreen';
 import OnboardingScreen from '../screens/auth/OnboardingScreen';
-import AddressVerificationScreen from '../screens/auth/AddressVerificationScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 
 export type AuthStackParamList = {
@@ -14,7 +13,6 @@ export type AuthStackParamList = {
   Register: undefined;
   OTP: { email: string; expectedOtp?: string };
   Onboarding: undefined;
-  AddressVerification: undefined;
   ForgotPassword: undefined;
 };
 
@@ -62,7 +60,6 @@ const AuthStack: React.FC = () => {
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="OTP" component={OTPScreen} />
       <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-      <Stack.Screen name="AddressVerification" component={AddressVerificationScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </Stack.Navigator>
   );

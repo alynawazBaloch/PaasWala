@@ -22,7 +22,7 @@ const resolveApiKey = (): string => {
     ['expoConfig.extra.brevoApiKeyExpoPub', (Constants.expoConfig?.extra as Record<string, any>)?.brevoApiKeyExpoPublic],
     ['process.env.EXPO_PUBLIC_BREVO_API',   process.env.EXPO_PUBLIC_BREVO_API_KEY],
     ['process.env.BREVO_API_KEY',           process.env.BREVO_API_KEY],
-    ['manifest.extra.brevoApiKey',          (Constants.manifest?.extra as Record<string, any>)?.brevoApiKey],
+    ['manifest.extra.brevoApiKey',          (Constants.expoConfig?.extra as Record<string, any>)?.brevoApiKey],
   ];
   for (const [label, val] of sources) {
     if (val && typeof val === 'string') {

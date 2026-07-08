@@ -61,10 +61,15 @@ const CreatePollScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
       question: question.trim(),
       options: pollOptions,
       totalVotes: 0,
+      voters: {},
       isPinned: false,
+      pinnedAt: undefined,
       isAdmin: false,
       expiresAt: Date.now() + selectedDuration,
       createdBy: 'Resident',
+      createdById: '',
+      anonymous: isAnonymous,
+      createdAt: Date.now(),
     };
 
     await savePoll(newPoll);

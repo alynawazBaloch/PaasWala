@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.paaswala.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "PaasWala needs your location to show neighborhood content near you."
+        "NSLocationWhenInUseUsageDescription": "PaasWala needs your location to show neighborhood content near you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "PaasWala needs background location to update your neighborhood presence.",
+        "NSLocationAlwaysUsageDescription": "PaasWala needs background location to update your neighborhood presence."
       }
     },
     "android": {
@@ -23,21 +25,46 @@
       "package": "com.paaswala.app",
       "config": {
         "googleMaps": {
-          "apiKey": "$GOOGLE_MAPS_API_KEY"
+          "apiKey": "AIzaSyBcSECcE0Sq9s2gDZGrym86L2w48HyP7Rg"
         }
       },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "RECORD_AUDIO",
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS",
+        "INTERNET"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "PaasWala needs background location to update your neighborhood presence.",
+          "locationAlwaysPermission": "PaasWala needs background location to update your neighborhood presence.",
+          "locationWhenInUsePermission": "PaasWala needs your location to show neighborhood content near you."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2D6A4F"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PaasWala needs camera access to take profile photos and share media."
+        }
+      ],
+      "expo-image-picker"
     ],
     "extra": {
       "firebaseApiKey": "$FIREBASE_API_KEY",
@@ -53,6 +80,12 @@
         "projectId": "e12c748b-9391-46b5-9ef5-87d689c0315d"
       }
     },
-    "owner": "alynawazz"
+    "owner": "alynawazz",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e12c748b-9391-46b5-9ef5-87d689c0315d"
+    }
   }
 }

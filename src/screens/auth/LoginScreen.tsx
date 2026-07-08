@@ -30,7 +30,7 @@ const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [passwordError, setPasswordError] = useState('');
   const [generalError, setGeneralError] = useState('');
   const { language, setLanguage, t } = useLanguage();
-  const { setUser } = useAuth();
+  const { setUser, login, loginWithGoogle } = useAuth();
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
   const triggerShake = () => {
@@ -73,23 +73,7 @@ const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     setIsLoading(true);
     setGeneralError('');
     try {
-      // Firebase auth integration placeholder
-      // await login(email.trim(), password);
-      setUser({
-        uid: 'user_' + Date.now().toString(36),
-        name: email.split('@')[0] || 'Neighbor',
-        email: email.trim(),
-        role: 'resident',
-        verified: false,
-        neighborhoodId: 'n_1',
-        neighborhoodName: 'My Mohalla',
-        reputationScore: 0,
-        onlineStatus: true,
-        showOnlineStatus: true,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        likesPrivacyDefault: 'neighborhood',
-      });
+      await login(email.trim(), password);
     } catch (err: any) {
       setGeneralError(err.message || 'Invalid email or password. Please try again.');
       triggerShake();
@@ -102,22 +86,7 @@ const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     setIsLoading(true);
     setGeneralError('');
     try {
-      // Google Sign-In integration placeholder
-      setUser({
-        uid: 'user_' + Date.now().toString(36),
-        name: 'Google User',
-        email: email.trim() || 'google.user@example.com',
-        role: 'resident',
-        verified: true,
-        neighborhoodId: 'n_1',
-        neighborhoodName: 'My Mohalla',
-        reputationScore: 0,
-        onlineStatus: true,
-        showOnlineStatus: true,
-        createdAt: Date.now(),
-        lastSeen: Date.now(),
-        likesPrivacyDefault: 'neighborhood',
-      });
+      await loginWithGoogle();
     } catch (err: any) {
       setGeneralError(err.message || 'Google login failed');
     } finally {
