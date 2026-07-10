@@ -55,11 +55,6 @@ const VerificationDetailScreen: React.FC<{ navigation: any; route: any }> = ({
       const ok = await approveVerification(request.id, user.uid, adminNote.trim());
       if (!ok) throw new Error('Firestore update failed');
 
-      // Also update user's verified status
-      await updateDoc(doc(db, 'users', request.userId), {
-        verified: true,
-      });
-
       Alert.alert('Approved', `${request.userName}'s address has been verified.`, [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);

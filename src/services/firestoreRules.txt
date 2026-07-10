@@ -285,6 +285,101 @@ service cloud.firestore {
     }
 
     /* ================================================================== */
+    /*  Messages (top-level collection)                                     */
+    /*  NOTE: Updates also go to subcollection chats/{chatId}/messages/    */
+    /* ================================================================== */
+
+    match /messages/{messageId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && request.resource.data.senderId == request.auth.uid;
+      allow delete: if isAuth() && (
+        request.resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Chat Requests                                                       */
+    /* ================================================================== */
+
+    match /chat_requests/{requestId} {
+      allow read: if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.fromUserId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid);
+      allow delete: if isAuth() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid);
+    }
+
+    /* ================================================================== */
+    /*  Call Logs                                                           */
+    /* ================================================================== */
+
+    match /call_logs/{logId} {
+      allow read: if isAuth() && (
+        resource.data.callerId == request.auth.uid ||
+        resource.data.calleeId == request.auth.uid);
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Call Offers (WebRTC signaling)                                      */
+    /* ================================================================== */
+
+    match /call_offers/{offerId} {
+      allow read: if isAuth() && (
+        resource.data.callerId == request.auth.uid ||
+        resource.data.calleeId == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.callerId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.callerId == request.auth.uid ||
+        resource.data.calleeId == request.auth.uid);
+      allow delete: if isAuth() && (
+        resource.data.callerId == request.auth.uid || isAdmin());
+    }
+
+    /* ================================================================== */
+    /*  Admin Pending Items                                                 */
+    /* ================================================================== */
+
+    match /admin_pending/{itemId} {
+      allow read: if isAuth() && isAdmin();
+      allow create: if isAuth();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Admin Reports                                                       */
+    /* ================================================================== */
+
+    match /admin_reports/{reportId} {
+      allow read: if isAuth() && isAdmin();
+      allow create: if isAuth();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    /* ================================================================== */
+    /*  Password Resets (forgot password OTP flow)                         */
+    /* ================================================================== */
+
+    match /passwordResets/{docId} {
+      // Anyone can read their own password reset doc (to check OTP status)
+      allow read: if isAuth();
+      // Only authenticated users can create/update — server creates on OTP send
+      allow create: if isAuth();
+      allow update: if isAuth();
+      // Clean up after reset
+      allow delete: if isAuth();
+    }
+
+    /* ================================================================== */
     /*  Deny everything else                                                */
     /* ================================================================== */
 

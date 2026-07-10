@@ -6,6 +6,7 @@ import {
   Animated,
   Dimensions,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,18 +25,19 @@ const VERIFY_DURATION = 10000; // 10 seconds
 
 const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const { user, updateUser } = useAuth();
-  const [phase, setPhase] = useState<'detecting' | 'verifying' | 'verified'>('detecting');
+  const [phase, setPhase] = useState<'detecting' | 'verifying' | 'verified' | 'error'>('detecting');
+  const [locAttempt, setLocAttempt] = useState<string>('Getting last known location...');
   const [mapRegion, setMapRegion] = useState<Region>({
     latitude: 31.481120,
     longitude: 74.314970,
-    latitudeDelta: 0.02,
-    longitudeDelta: 0.02,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
   });
   const [address, setAddress] = useState('');
   const [area, setArea] = useState('');
   const [city, setCity] = useState('');
-  const [capturedLat, setCapturedLat] = useState(31.481120);
-  const [capturedLng, setCapturedLng] = useState(74.314970);
+  const [capturedLat, setCapturedLat] = useState<number | null>(null);
+  const [capturedLng, setCapturedLng] = useState<number | null>(null);
 
   // Animations
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -43,20 +45,63 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const checkScale = useRef(new Animated.Value(0)).current;
 
-  // Auto-detect location on mount
-  useEffect(() => {
-    (async () => {
+  const attemptLocation = async () => {
+    setPhase('detecting');
+    setLocAttempt('Requesting location permission...');
+
+    try {
+      const { status: perm } = await Location.requestForegroundPermissionsAsync();
+      if (perm !== 'granted') {
+        setLocAttempt('Permission denied — using approximate area');
+        setPhase('verifying');
+        return;
+      }
+
+      // ----- TRY 1: Last known position (instant) -----
+      setLocAttempt('Getting last known location...');
+      let loc: Location.LocationObject | null = null;
       try {
-        const { status: perm } = await Location.requestForegroundPermissionsAsync();
-        if (perm !== 'granted') {
-          console.warn('[LocationVerification] Location permission denied');
-          // Use default location if denied
-          setPhase('verifying');
-          return;
+        const last = await Location.getLastKnownPositionAsync({});
+        if (last?.coords) {
+          loc = last;
         }
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      } catch {
+        // Fall through to next try
+      }
+
+      // ----- TRY 2: Low accuracy (WiFi/cell, fast) -----
+      if (!loc) {
+        setLocAttempt('Finding location (WiFi/cell)...');
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 8000)
+          );
+          const locPromise = Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Low,
+          });
+          loc = await Promise.race([locPromise, timeoutPromise]);
+        } catch {
+          // Fall through to next try
+        }
+      }
+
+      // ----- TRY 3: Balanced accuracy (GPS, slower) -----
+      if (!loc) {
+        setLocAttempt('Getting precise location (GPS)...');
+        try {
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 15000)
+          );
+          const locPromise = Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          loc = await Promise.race([locPromise, timeoutPromise]);
+        } catch {
+          // All attempts failed
+        }
+      }
+
+      if (loc?.coords) {
         const { latitude, longitude } = loc.coords;
         setCapturedLat(latitude);
         setCapturedLng(longitude);
@@ -71,16 +116,26 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
             if (addr.district || addr.subregion) setArea(addr.district || addr.subregion || '');
             if (addr.city) setCity(addr.city);
           }
-        } catch (geoErr) {
-          console.warn('[LocationVerification] Reverse geocode failed:', geoErr);
+        } catch {
+          // Reverse geocode failed — proceed without address string
         }
 
         setPhase('verifying');
-      } catch (err) {
-        console.warn('[LocationVerification] Location fetch failed:', err);
-        setPhase('verifying');
+      } else {
+        // No location obtained at all
+        setPhase('error');
+        setLocAttempt('Could not detect your location. Make sure GPS/WiFi is on.');
       }
-    })();
+    } catch (err) {
+      console.warn('[LocationVerification] Location fetch failed:', err);
+      setPhase('error');
+      setLocAttempt('Something went wrong. Please try again.');
+    }
+  };
+
+  // Auto-detect location on mount
+  useEffect(() => {
+    attemptLocation();
   }, []);
 
   // Start verification animation + timer
@@ -96,16 +151,18 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
 
     // After VERIFY_DURATION, auto-verify the user
     const timer = setTimeout(async () => {
+      const lat = capturedLat ?? mapRegion.latitude;
+      const lng = capturedLng ?? mapRegion.longitude;
       try {
-        const geohash = geohashForLocation([capturedLat, capturedLng]);
+        const geohash = geohashForLocation([lat, lng]);
         await updateUser({
           verified: true,
           streetName: address,
           address,
           area,
           city,
-          latitude: capturedLat,
-          longitude: capturedLng,
+          latitude: lat,
+          longitude: lng,
           geohash,
           neighborhoodName: area || 'My Mohalla',
           lastLocationUpdate: Date.now(),
@@ -166,8 +223,56 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
             <Ionicons name="locate-outline" size={48} color={Colors.accent} />
           </View>
           <Text style={styles.detectingTitle}>Detecting Your Location</Text>
-          <Text style={styles.detectingSub}>Please enable location access to verify your neighborhood</Text>
+          <Text style={styles.detectingSub}>{locAttempt}</Text>
           <ActivityIndicator size="large" color={Colors.accent} style={{ marginTop: 24 }} />
+          <TouchableOpacity
+            style={styles.retryLink}
+            onPress={attemptLocation}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={14} color={Colors.textSecondary} />
+            <Text style={styles.retryLinkText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ============ ERROR PHASE ============
+  if (phase === 'error') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.centerContainer}>
+          <View style={[styles.detectingIcon, { borderColor: Colors.warning }]}>
+            <Ionicons name="warning-outline" size={48} color={Colors.warning} />
+          </View>
+          <Text style={styles.detectingTitle}>Location Unavailable</Text>
+          <Text style={styles.detectingSub}>{locAttempt}</Text>
+
+          <GlassCard style={{ padding: 24, marginTop: 24, alignItems: 'center' }}>
+            <Text style={{ color: Colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20 }}>
+              We'll use your general area for now. You can update your location later in Settings.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+              <GlowButton
+                title="Retry"
+                onPress={attemptLocation}
+                variant="outline"
+                icon={<Ionicons name="refresh" size={18} color={Colors.accent} />}
+                iconPosition="left"
+                style={{ flex: 1 }}
+              />
+              <GlowButton
+                title="Continue Anyway"
+                onPress={() => {
+                  setPhase('verifying');
+                }}
+                gradientColors={[Colors.accent, Colors.primary]}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </GlassCard>
         </View>
       </SafeAreaView>
     );
@@ -175,6 +280,8 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
 
   // ============ VERIFIED PHASE (success) ============
   if (phase === 'verified') {
+    const lat = capturedLat ?? mapRegion.latitude;
+    const lng = capturedLng ?? mapRegion.longitude;
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="light" />
@@ -194,21 +301,26 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
               </Text>
 
               {/* Location Details */}
-              {address ? (
+              {address || capturedLat ? (
                 <View style={styles.locationDetails}>
                   <MapView
                     style={styles.miniMap}
-                    region={mapRegion}
+                    region={{
+                      latitude: lat,
+                      longitude: lng,
+                      latitudeDelta: 0.02,
+                      longitudeDelta: 0.02,
+                    }}
                     scrollEnabled={false}
                     zoomEnabled={false}
                     customMapStyle={DARK_MAP_STYLE}
                   >
-                    <Marker coordinate={{ latitude: capturedLat, longitude: capturedLng }} />
+                    <Marker coordinate={{ latitude: lat, longitude: lng }} />
                   </MapView>
                   <View style={styles.locationTextWrap}>
                     <Ionicons name="location" size={16} color={Colors.accent} />
                     <Text style={styles.locationText}>
-                      {[address, area, city].filter(Boolean).join(', ')}
+                      {[address, area, city].filter(Boolean).join(', ') || `${lat.toFixed(4)}, ${lng.toFixed(4)}`}
                     </Text>
                   </View>
                 </View>
@@ -230,6 +342,8 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
   }
 
   // ============ VERIFYING PHASE (10s loading) ============
+  const lat = capturedLat ?? mapRegion.latitude;
+  const lng = capturedLng ?? mapRegion.longitude;
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -249,7 +363,7 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
             customMapStyle={DARK_MAP_STYLE}
           >
             <Marker
-              coordinate={{ latitude: capturedLat, longitude: capturedLng }}
+              coordinate={{ latitude: lat, longitude: lng }}
               pinColor={Colors.accent}
             />
           </MapView>
@@ -278,7 +392,14 @@ const LocationVerificationScreen: React.FC<{ navigation: any }> = ({ navigation 
                 {[address, area, city].filter(Boolean).join(', ')}
               </Text>
             </View>
-          ) : null}
+          ) : (
+            <View style={styles.addressPreview}>
+              <Ionicons name="location-outline" size={16} color={Colors.textSecondary} />
+              <Text style={styles.addressPreviewText}>
+                {lat.toFixed(4)}, {lng.toFixed(4)}
+              </Text>
+            </View>
+          )}
 
           {/* Animated Progress Bar */}
           <View style={styles.progressTrack}>
@@ -328,6 +449,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontFamily: 'Inter',
     lineHeight: 20,
+    paddingHorizontal: 20,
+  },
+  retryLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 20,
+  },
+  retryLinkText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontFamily: 'Inter',
   },
   // Verifying phase
   verifyContainer: {

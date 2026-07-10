@@ -55,11 +55,14 @@ export const useFeed = (): UseFeedReturn => {
     allPostsRef.current = new Map([...allPostsRef.current.entries()]);
     newPosts.forEach((p) => allPostsRef.current.set(p.id, p));
 
-    const merged = Array.from(allPostsRef.current.values());
+    const blockedUsers = user?.blockedUsers || [];
+    const merged = Array.from(allPostsRef.current.values())
+      .filter((p) => !blockedUsers.includes(p.authorId) && p.hidden !== true);
+
     merged.sort((a, b) => b.timestamp - a.timestamp);
     setPosts(merged);
     setLoading(false);
-  }, []);
+  }, [user]);
 
   // Start neighborhood-level listener
   const startNeighborhoodListener = useCallback(
@@ -76,14 +79,16 @@ export const useFeed = (): UseFeedReturn => {
           setFeedRadius('neighborhood');
         }
 
-        const sorted = Array.from(allPostsRef.current.values());
+        const blockedUsers = user?.blockedUsers || [];
+        const sorted = Array.from(allPostsRef.current.values())
+          .filter((p) => !blockedUsers.includes(p.authorId) && p.hidden !== true);
         sorted.sort((a, b) => b.timestamp - a.timestamp);
         setPosts(sorted);
         setLoading(false);
       });
       unsubscribesRef.current.push(unsub);
     },
-    []
+    [user]
   );
 
   // Listen for nearby users and their posts (expanded feed)
@@ -226,7 +231,7 @@ export const useFeed = (): UseFeedReturn => {
             : p
         )
       );
-      await dsLikePost(postId, user.uid);
+      await dsLikePost(postId, user.uid, undefined, reaction as any);
     },
     [user]
   );

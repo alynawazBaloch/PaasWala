@@ -1,5 +1,6 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
+import { onRequest } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
 
@@ -67,6 +68,83 @@ async function deleteQueryInBatches(
 
   return totalDeleted;
 }
+
+// ============================================================
+// 0. resetPasswordWithOTP (HTTPS callable alternative via POST)
+// URL: https://us-central1-<project>.cloudfunctions.net/resetPasswordWithOTP
+//
+// Accepts: { email, newPassword }
+// Validates the request by verifying the Firestore passwordResets doc
+// has been marked verified=true, then sets the Firebase Auth password.
+// ============================================================
+
+export const resetPasswordWithOTP = onRequest(
+  { cors: true },
+  async (req, res) => {
+    // Only allow POST
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed — use POST' });
+      return;
+    }
+
+    const { email, newPassword } = req.body || {};
+
+    if (!email || !newPassword) {
+      res.status(400).json({ error: 'email and newPassword are required.' });
+      return;
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      res.status(400).json({ error: 'Password must be at least 6 characters.' });
+      return;
+    }
+
+    const docId = email.toLowerCase().trim().replace(/\./g, '_dot_');
+
+    try {
+      const resetRef = db.collection('passwordResets').doc(docId);
+      const snap = await resetRef.get();
+
+      if (!snap.exists) {
+        res.status(400).json({ error: 'No password reset request found for this email.' });
+        return;
+      }
+
+      const data = snap.data();
+
+      // Check if OTP was verified
+      if (!data?.verified) {
+        res.status(400).json({ error: 'OTP has not been verified. Please complete OTP verification first.' });
+        return;
+      }
+
+      // Check expiry (10 min grace period after OTP verification)
+      if (data.expiresAt && (data.expiresAt as number) + 5 * 60 * 1000 < Date.now()) {
+        res.status(400).json({ error: 'OTP session has expired. Please request a new code.' });
+        return;
+      }
+
+      // Update Firebase Auth password using Admin SDK
+      const userRecord = await admin.auth().getUserByEmail(email);
+      await admin.auth().updateUser(userRecord.uid, {
+        password: newPassword,
+      });
+
+      logger.info(`[resetPasswordWithOTP] Password reset successfully for ${email}`);
+
+      res.status(200).json({ success: true, message: 'Password has been reset successfully.' });
+    } catch (error: any) {
+      logger.error('[resetPasswordWithOTP] Error:', error);
+
+      if (error.code === 'auth/user-not-found') {
+        res.status(404).json({ error: 'No user found with this email address.' });
+        return;
+      }
+
+      res.status(500).json({ error: 'Failed to reset password. Please try again later.' });
+    }
+  },
+);
 
 // ============================================================
 // 1. deleteExpiredStories

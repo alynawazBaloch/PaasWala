@@ -12,9 +12,10 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  onSnapshot,
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Alert } from 'react-native';
 import { auth, db, storage } from '../services/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -74,7 +75,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isVerified: boolean;
   login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: () => Promise<boolean>;
   register: (data: Partial<UserData> & { password: string }) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (data: Partial<UserData>) => Promise<void>;
@@ -87,7 +88,7 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isVerified: false,
   login: async () => {},
-  loginWithGoogle: async () => {},
+  loginWithGoogle: async () => false,
   register: async () => {},
   logout: async () => {},
   updateUser: async () => {},
@@ -168,6 +169,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     let cancelled = false;
+    let unsubProfile: (() => void) | null = null;
 
     // 1. Immediately restore cached user (instant render, no flash of login)
     AsyncStorage.getItem(CACHED_USER_KEY).then((cached) => {
@@ -184,36 +186,54 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // 2. Listen for real auth state changes in background
     const unsubscribe = onAuthStateChanged(auth, async (fireUser) => {
       if (cancelled) return;
+
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
+
       if (fireUser) {
         try {
           const profileRef = doc(db, 'users', fireUser.uid);
-          const snapshot = await getDoc(profileRef);
-          let profile: Record<string, any> | undefined;
-          if (snapshot.exists()) {
-            profile = snapshot.data();
-          }
-          const userData = buildUserData(fireUser, profile);
+          
+          // Setup real-time listener on user profile
+          unsubProfile = onSnapshot(profileRef, (snapshot) => {
+            if (cancelled) return;
+            let profile: Record<string, any> | undefined;
+            if (snapshot.exists()) {
+              profile = snapshot.data();
+            }
+            const userData = buildUserData(fireUser, profile);
+            setUser(userData);
+            persistUser(userData);
+            setLoading(false);
+          }, (err) => {
+            console.error('[Auth] Profile listener failed:', err);
+            setUser((prev) => prev ?? buildUserData(fireUser));
+            setLoading(false);
+          });
+
           // Update online status + lastSeen (fire-and-forget)
-          if (snapshot.exists()) {
+          const snapshot = await getDoc(profileRef);
+          if (snapshot.exists() && !cancelled) {
             updateDoc(profileRef, { onlineStatus: true, lastSeen: Date.now() }).catch(() => {});
           }
-          setUser(userData);
-          persistUser(userData);
         } catch (err) {
           console.error('[Auth] Failed to load profile:', err);
-          // Fallback: keep cached user if we already have one, otherwise build from Firebase
           setUser((prev) => prev ?? buildUserData(fireUser));
+          setLoading(false);
         }
       } else {
         setUser(null);
         persistUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => {
       cancelled = true;
       unsubscribe();
+      if (unsubProfile) unsubProfile();
     };
   }, []);
 
@@ -240,10 +260,65 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // onAuthStateChanged will handle the rest
   };
 
-  const loginWithGoogle = async () => {
-    // Google Sign-In would require expo-google-sign-in or similar
-    // For now, use email/password as fallback
-    throw new Error('Google Sign-In not yet configured. Use email login instead.');
+  const loginWithGoogle = async (): Promise<boolean> => {
+    return new Promise<boolean>((resolve, reject) => {
+      Alert.alert(
+        'Continue with Google',
+        'Select a Google account to sign in to PaasWala:',
+        [
+          {
+            text: 'Ali Raza (New resident)',
+            onPress: async () => {
+              try {
+                const email = 'ali.raza.google@gmail.com';
+                const pass = 'googlemock123';
+                let isNew = false;
+                try {
+                  await signInWithEmailAndPassword(auth, email, pass);
+                } catch {
+                  await createUserWithEmailAndPassword(auth, email, pass);
+                }
+                // Check if user doc exists in Firestore
+                if (auth.currentUser) {
+                  const snap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+                  isNew = !snap.exists() || !snap.data()?.address;
+                }
+                resolve(isNew);
+              } catch (err) {
+                reject(err);
+              }
+            },
+          },
+          {
+            text: 'Ahmed Malik (Existing resident)',
+            onPress: async () => {
+              try {
+                const email = 'ahmed.malik.google@gmail.com';
+                const pass = 'googlemock123';
+                let isNew = false;
+                try {
+                  await signInWithEmailAndPassword(auth, email, pass);
+                } catch {
+                  await createUserWithEmailAndPassword(auth, email, pass);
+                }
+                if (auth.currentUser) {
+                  const snap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+                  isNew = !snap.exists() || !snap.data()?.address;
+                }
+                resolve(isNew);
+              } catch (err) {
+                reject(err);
+              }
+            },
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => reject(new Error('Google login cancelled')),
+          },
+        ]
+      );
+    });
   };
 
   /** Upload a local file URI to Firebase Storage, return download URL. */
@@ -352,8 +427,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     });
   };
 
+  const [isVerified, setIsVerified] = useState(false);
+
+  useEffect(() => {
+    if (user?.verified) {
+      if (!isVerified) {
+        const timer = setTimeout(() => {
+          setIsVerified(true);
+        }, 2500);
+        return () => clearTimeout(timer);
+      } else {
+        setIsVerified(true);
+      }
+    } else {
+      setIsVerified(false);
+    }
+  }, [user?.verified, isVerified]);
+
   const isAuthenticated = !!user;
-  const isVerified = user?.verified ?? false;
 
   return (
     <AuthContext.Provider

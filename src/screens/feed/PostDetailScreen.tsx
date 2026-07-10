@@ -24,7 +24,7 @@ import TappableAuthor from '../../components/shared/TappableAuthor';
 import Colors from '../../utils/colors';
 import { ROLE_BADGES } from '../../utils/constants';
 import { useAuth } from '../../context/AuthContext';
-import { getComments, getPost, addComment as dsAddComment } from '../../services/dataService';
+import { getComments, getPost, addComment as dsAddComment, listenPost, listenComments } from '../../services/dataService';
 import type { Post as FeedPost } from '../../services/dataService';
 import type { Comment as DSComment } from '../../services/dataService';
 
@@ -33,8 +33,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // -- removed local Comment interface and MOCK_COMMENTS --
 
 const formatRelativeTime = (timestamp: number): string => {
-  const now = Date.now();
-  const diff = now - timestamp;
+  const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
@@ -64,34 +63,51 @@ const PostDetailScreen: React.FC<{ navigation?: any; route?: any }> = ({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sendButtonScale = useRef(new RNAnimated.Value(1)).current;
 
-  // Load the real post
+  // Load the real post & comments in real-time
   useEffect(() => {
-    const load = async () => {
-      const id = route?.params?.postId || '';
-      if (!id) {
+    const id = route?.params?.postId || '';
+    if (!id) {
+      setPostLoading(false);
+      return;
+    }
+
+    let unsubPost: (() => void) | null = null;
+    let unsubComments: (() => void) | null = null;
+
+    const init = async () => {
+      // 1. Fetch once to find the neighborhoodId
+      const initialPost = await getPost(id);
+      if (!initialPost) {
         setPostLoading(false);
         return;
       }
-      const found = await getPost(id);
-      if (found) {
-        setPost(found);
-        setLikeCount(found.likesCount ?? 0);
-      }
+      setPost(initialPost);
+      setLikeCount(initialPost.likesCount ?? 0);
       setPostLoading(false);
-    };
-    load();
-  }, [route?.params?.postId]);
 
-  // Load real comments
-  useEffect(() => {
-    const loadComments = async () => {
-      const id = route?.params?.postId || '';
-      if (!id) return;
-      const loaded = await getComments(id);
-      setComments(loaded);
+      const nId = initialPost.neighborhoodId;
+
+      // 2. Set up real-time listener on the post
+      unsubPost = listenPost(id, nId, (updatedPost) => {
+        if (updatedPost) {
+          setPost(updatedPost);
+          setLikeCount(updatedPost.likesCount ?? 0);
+        }
+      });
+
+      // 3. Set up real-time listener on comments subcollection
+      unsubComments = listenComments(id, nId, (loadedComments) => {
+        setComments(loadedComments);
+      });
     };
-    loadComments();
-  }, []);
+
+    init();
+
+    return () => {
+      if (unsubPost) unsubPost();
+      if (unsubComments) unsubComments();
+    };
+  }, [route?.params?.postId]);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardWillShow', (e) => {

@@ -44,3 +44,12 @@ yarn-error.*
 
 # APK files
 *.apk
+
+# Firebase Cloud Functions compiled output
+functions/lib/
+
+# Claude AI project files
+.claude/
+CLAUDE.md
+AGENTS.md
+plan.md

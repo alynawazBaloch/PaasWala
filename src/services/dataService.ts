@@ -20,6 +20,7 @@ import {
   writeBatch,
   limit,
   startAfter,
+  collectionGroup,
 } from 'firebase/firestore';
 import { geohashQueryBounds, distanceBetween } from 'geofire-common';
 
@@ -64,6 +65,7 @@ export interface Comment {
   timestamp: number;
   likesCount: number;
   userLiked: boolean;
+  neighborhoodId?: string;
 }
 
 export interface ChatMessage {
@@ -448,79 +450,198 @@ async function fsDelete(collectionName: string, id: string): Promise<void> {
 
 export async function getPosts(): Promise<Post[]> {
   try {
-    const snapshot = await getDocs(collection(db, 'posts'));
+    const q = query(collectionGroup(db, 'posts'));
+    const snapshot = await getDocs(q);
     if (!snapshot.empty) {
       const posts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Post));
       posts.sort((a, b) => b.timestamp - a.timestamp);
       await setAll(STORAGE_KEYS.POSTS, posts).catch(() => {});
       return posts;
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[DataService] getPosts failed:', err);
+  }
   return getAll<Post>(STORAGE_KEYS.POSTS);
 }
 
-export async function getPost(id: string): Promise<Post | null> {
+export async function getPost(id: string, neighborhoodId?: string): Promise<Post | null> {
   try {
-    const snapshot = await getDoc(doc(db, 'posts', id));
-    if (snapshot.exists()) {
-      return { id: snapshot.id, ...snapshot.data() } as Post;
+    if (neighborhoodId) {
+      const snapshot = await getDoc(doc(db, 'neighborhoods', neighborhoodId, 'posts', id));
+      if (snapshot.exists()) {
+        return { id: snapshot.id, ...snapshot.data() } as Post;
+      }
+    } else {
+      const q = query(collectionGroup(db, 'posts'), where('id', '==', id));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Post;
+      }
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[DataService] getPost failed:', err);
+  }
   return getById<Post>(STORAGE_KEYS.POSTS, id);
 }
 
 export async function savePost(post: Post): Promise<void> {
-  await fsSet('posts', post);
+  const nId = post.neighborhoodId || 'default';
+  await setDoc(doc(db, 'neighborhoods', nId, 'posts', post.id), post);
   await addItem(STORAGE_KEYS.POSTS, post);
 }
 
-export async function updatePost(id: string, updates: Partial<Post>): Promise<void> {
-  await fsUpdate('posts', id, updates);
+export async function updatePost(id: string, updates: Partial<Post>, neighborhoodId?: string): Promise<void> {
+  let nId = neighborhoodId;
+  if (!nId) {
+    const p = await getPost(id);
+    if (p) nId = p.neighborhoodId;
+  }
+  if (nId) {
+    await updateDoc(doc(db, 'neighborhoods', nId, 'posts', id), updates);
+  }
   await updateItem(STORAGE_KEYS.POSTS, id, updates);
 }
 
-export async function deletePost(id: string): Promise<void> {
-  await fsDelete('posts', id);
+export async function deletePost(id: string, neighborhoodId?: string): Promise<void> {
+  let nId = neighborhoodId;
+  if (!nId) {
+    const p = await getPost(id);
+    if (p) nId = p.neighborhoodId;
+  }
+  if (nId) {
+    await deleteDoc(doc(db, 'neighborhoods', nId, 'posts', id));
+  }
   await removeItem(STORAGE_KEYS.POSTS, id);
 }
 
-export async function likePost(postId: string, userId: string): Promise<void> {
-  const post = await getPost(postId);
-  if (!post) return;
-  const alreadyLiked = post.userLiked;
-  await updatePost(postId, {
-    likesCount: alreadyLiked ? post.likesCount - 1 : post.likesCount + 1,
-    userLiked: !alreadyLiked,
-    userReaction: alreadyLiked ? undefined : 'like',
-  });
+export async function likePost(
+  postId: string,
+  userId: string,
+  neighborhoodId?: string,
+  reactionType: 'like' | 'care' | 'wow' | 'alert' = 'like'
+): Promise<void> {
+  try {
+    let nId = neighborhoodId;
+    if (!nId) {
+      const p = await getPost(postId);
+      if (p) nId = p.neighborhoodId;
+    }
+    if (!nId) return;
+
+    const likeRef = doc(db, 'neighborhoods', nId, 'posts', postId, 'likes', userId);
+    const likeSnap = await getDoc(likeRef);
+    const postRef = doc(db, 'neighborhoods', nId, 'posts', postId);
+
+    if (likeSnap.exists()) {
+      await deleteDoc(likeRef);
+      await updateDoc(postRef, {
+        likesCount: increment(-1),
+      });
+    } else {
+      await setDoc(likeRef, {
+        userId,
+        reactionType,
+        timestamp: Date.now(),
+      });
+      await updateDoc(postRef, {
+        likesCount: increment(1),
+      });
+    }
+  } catch (err) {
+    console.warn('[DataService] likePost failed:', err);
+  }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Comment helpers                                                    */
-/* ------------------------------------------------------------------ */
-
-export async function getComments(postId: string): Promise<Comment[]> {
+export async function getComments(postId: string, neighborhoodId?: string): Promise<Comment[]> {
   try {
-    const q = query(collection(db, 'comments'), where('postId', '==', postId));
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-      const comments = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
-      comments.sort((a, b) => b.timestamp - a.timestamp);
-      return comments;
+    let nId = neighborhoodId;
+    if (!nId) {
+      const p = await getPost(postId);
+      if (p) nId = p.neighborhoodId;
     }
-  } catch {}
+    if (nId) {
+      const q = query(
+        collection(db, 'neighborhoods', nId, 'posts', postId, 'comments'),
+        orderBy('timestamp', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
+      }
+    }
+  } catch (err) {
+    console.warn('[DataService] getComments failed:', err);
+  }
   const all = await getAll<Comment>(STORAGE_KEYS.COMMENTS);
   return all.filter((c) => c.postId === postId);
 }
 
-export async function addComment(comment: Comment): Promise<void> {
-  await addItem(STORAGE_KEYS.COMMENTS, comment);
-  await fsSet('comments', comment);
-  // Bump commentsCount on the post
-  const post = await getPost(comment.postId);
-  if (post) {
-    await updatePost(comment.postId, { commentsCount: post.commentsCount + 1 });
+export async function addComment(comment: Comment, neighborhoodId?: string): Promise<void> {
+  try {
+    let nId = neighborhoodId || comment.neighborhoodId;
+    if (!nId) {
+      const p = await getPost(comment.postId);
+      if (p) nId = p.neighborhoodId;
+    }
+    if (!nId) return;
+
+    const commentRef = doc(db, 'neighborhoods', nId, 'posts', comment.postId, 'comments', comment.id);
+    await setDoc(commentRef, comment);
+    await addItem(STORAGE_KEYS.COMMENTS, comment);
+
+    const postRef = doc(db, 'neighborhoods', nId, 'posts', comment.postId);
+    await updateDoc(postRef, {
+      commentsCount: increment(1),
+    });
+  } catch (err) {
+    console.warn('[DataService] addComment failed:', err);
   }
+}
+
+export function listenPost(
+  id: string,
+  neighborhoodId: string,
+  callback: (post: Post | null) => void
+): () => void {
+  const ref = doc(db, 'neighborhoods', neighborhoodId, 'posts', id);
+  return onSnapshot(ref, (snap) => {
+    if (snap.exists()) {
+      callback({ id: snap.id, ...snap.data() } as Post);
+    } else {
+      callback(null);
+    }
+  });
+}
+
+export function listenComments(
+  postId: string,
+  neighborhoodId: string,
+  callback: (comments: Comment[]) => void
+): () => void {
+  const q = query(
+    collection(db, 'neighborhoods', neighborhoodId, 'posts', postId, 'comments'),
+    orderBy('timestamp', 'desc')
+  );
+  return onSnapshot(q, (snapshot) => {
+    const comments = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
+    callback(comments);
+  });
+}
+
+export function listenUserReaction(
+  postId: string,
+  userId: string,
+  neighborhoodId: string,
+  callback: (reaction: string | null) => void
+): () => void {
+  const likeRef = doc(db, 'neighborhoods', neighborhoodId, 'posts', postId, 'likes', userId);
+  return onSnapshot(likeRef, (snap) => {
+    if (snap.exists()) {
+      callback(snap.data()?.reactionType || 'like');
+    } else {
+      callback(null);
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -603,7 +724,7 @@ export async function updateMessage(
 
   // Update Firestore
   try {
-    await setDoc(doc(db, 'chats', chatId, 'messages', messageId), updates, { merge: true });
+    await updateDoc(doc(db, 'messages', messageId), updates);
   } catch (err: any) {
     if (err.code !== 'unavailable') console.error('[DS] updateMessage error:', err);
   }
@@ -1702,12 +1823,48 @@ export async function approveVerification(
   adminNote?: string
 ): Promise<boolean> {
   try {
-    await updateDoc(doc(db, 'verification_requests', requestId), {
+    const reqRef = doc(db, 'verification_requests', requestId);
+    const reqSnap = await getDoc(reqRef);
+    if (!reqSnap.exists()) return false;
+    const reqData = reqSnap.data() as VerificationRequest;
+
+    const batch = writeBatch(db);
+
+    // 1. Update verification request status
+    batch.update(reqRef, {
       status: 'approved',
       adminId,
       adminNote: adminNote || '',
       resolvedAt: Date.now(),
     });
+
+    // 2. Update user profile details
+    const userRef = doc(db, 'users', reqData.userId);
+    const normalizedNId = reqData.area.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_');
+    
+    // Retrieve current reputation to calculate tier
+    const userSnap = await getDoc(userRef);
+    let currentRep = 0;
+    if (userSnap.exists()) {
+      currentRep = userSnap.data()?.reputationScore || 0;
+    }
+    const nextRep = currentRep + 20;
+    const reputationTier = nextRep >= 100 ? 'silver' : 'bronze';
+
+    batch.update(userRef, {
+      verified: true,
+      neighborhoodId: normalizedNId,
+      neighborhoodName: reqData.area,
+      streetName: reqData.streetAddress,
+      address: `${reqData.streetAddress}, ${reqData.area}, ${reqData.city}`,
+      latitude: reqData.latitude,
+      longitude: reqData.longitude,
+      geohash: reqData.geohash,
+      reputationScore: increment(20),
+      reputationTier,
+    });
+
+    await batch.commit();
     return true;
   } catch (err) {
     console.warn('[DataService] approveVerification failed:', err);
@@ -2482,8 +2639,7 @@ export function listenNeighborhoodPosts(
 ): () => void {
   try {
     const q = query(
-      collection(db, 'posts'),
-      where('neighborhoodId', '==', neighborhoodId),
+      collection(db, 'neighborhoods', neighborhoodId, 'posts'),
       orderBy('timestamp', 'desc')
     );
     return onSnapshot(
@@ -2494,7 +2650,7 @@ export function listenNeighborhoodPosts(
       },
       (error) => {
         if (error.code === 'failed-precondition') {
-          console.warn('[DataService] Missing composite index for listenNeighborhoodPosts');
+          console.warn('[DataService] Missing index for listenNeighborhoodPosts');
         }
         getAll<Post>(STORAGE_KEYS.POSTS).then((all) => {
           const filtered = all.filter((p) => p.neighborhoodId === neighborhoodId);
@@ -2523,6 +2679,11 @@ export function listenPostsByAuthorIds(
 ): () => void {
   const unsubscribes: (() => void)[] = [];
 
+  if (authorIds.length === 0) {
+    callback([]);
+    return () => {};
+  }
+
   // Firestore 'in' queries max 10 values per call
   const chunkSize = 10;
   const chunks: string[][] = [];
@@ -2530,19 +2691,37 @@ export function listenPostsByAuthorIds(
     chunks.push(authorIds.slice(i, i + chunkSize));
   }
 
-  chunks.forEach((chunk) => {
+  const chunkPostsMap = new Map<number, Post[]>();
+
+  chunks.forEach((chunk, index) => {
     try {
       const q = query(
-        collection(db, 'posts'),
+        collectionGroup(db, 'posts'),
         where('authorId', 'in', chunk)
       );
       const unsub = onSnapshot(
         q,
         (snapshot) => {
-          const posts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Post));
-          callback(posts);
+          const chunkPosts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Post));
+          chunkPostsMap.set(index, chunkPosts);
+
+          // Merge and sort
+          const allPosts: Post[] = [];
+          const seen = new Set<string>();
+          chunkPostsMap.forEach((postsList) => {
+            postsList.forEach((p) => {
+              if (!seen.has(p.id)) {
+                seen.add(p.id);
+                allPosts.push(p);
+              }
+            });
+          });
+          allPosts.sort((a, b) => b.timestamp - a.timestamp);
+          callback(allPosts);
         },
-        () => {}
+        (err) => {
+          console.warn('[DataService] listenPostsByAuthorIds error:', err);
+        }
       );
       unsubscribes.push(unsub);
     } catch {

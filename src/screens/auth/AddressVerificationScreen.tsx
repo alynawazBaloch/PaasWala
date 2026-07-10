@@ -21,6 +21,8 @@ import GlowInput from '../../components/glass/GlowInput';
 import { DARK_MAP_STYLE } from '../../services/maps';
 import { createVerificationRequest } from '../../services/dataService';
 import { enrichCoordinates } from '../../services/location';
+import { db } from '../../services/firebase';
+import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 
 type StatusType = 'pending' | 'submitted' | 'approved' | 'rejected';
 
@@ -75,6 +77,35 @@ const AddressVerificationScreen: React.FC<{ navigation: any }> = ({ navigation }
       }
     })();
   }, []);
+
+  // Real-time listener for verification requests
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const q = query(
+      collection(db, 'verification_requests'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+      limit(1)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const reqData = snapshot.docs[0].data();
+        if (reqData.status === 'pending') {
+          setStatus('submitted');
+        } else if (reqData.status === 'approved') {
+          setStatus('approved');
+        } else if (reqData.status === 'rejected') {
+          setStatus('rejected');
+        }
+      }
+    }, (err) => {
+      console.warn('[AddressVerification] Real-time listener error:', err);
+    });
+
+    return unsubscribe;
+  }, [user?.uid]);
 
   const steps = [
     {
