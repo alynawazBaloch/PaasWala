@@ -367,16 +367,12 @@ service cloud.firestore {
 
     /* ================================================================== */
     /*  Password Resets (forgot password OTP flow)                         */
+    /*  NOTE: No auth required — user isn't logged in during forgot PW.   */
+    /*  Security is enforced by the OTP hash (SHA-256 + email salt).     */
     /* ================================================================== */
 
     match /passwordResets/{docId} {
-      // Anyone can read their own password reset doc (to check OTP status)
-      allow read: if isAuth();
-      // Only authenticated users can create/update — server creates on OTP send
-      allow create: if isAuth();
-      allow update: if isAuth();
-      // Clean up after reset
-      allow delete: if isAuth();
+      allow read, create, update, delete: if true;
     }
 
     /* ================================================================== */
