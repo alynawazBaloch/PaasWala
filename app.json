@@ -64,7 +64,8 @@
           "cameraPermission": "PaasWala needs camera access to take profile photos and share media."
         }
       ],
-      "expo-image-picker"
+      "expo-image-picker",
+      "expo-dev-client"
     ],
     "extra": {
       "firebaseApiKey": "$FIREBASE_API_KEY",
