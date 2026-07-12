@@ -485,8 +485,11 @@ export async function getPost(id: string, neighborhoodId?: string): Promise<Post
 }
 
 export async function savePost(post: Post): Promise<void> {
+  // Write to top-level posts collection (for listenPosts listener)
+  await fsSet('posts', post);
+  // Also write to subcollection (for collectionGroup queries + neighborhood scoping)
   const nId = post.neighborhoodId || 'default';
-  await setDoc(doc(db, 'neighborhoods', nId, 'posts', post.id), post);
+  setDoc(doc(db, 'neighborhoods', nId, 'posts', post.id), post).catch(() => {});
   await addItem(STORAGE_KEYS.POSTS, post);
 }
 

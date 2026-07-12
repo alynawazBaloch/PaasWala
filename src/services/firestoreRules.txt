@@ -266,6 +266,14 @@ service cloud.firestore {
       allow write: if isAuth() && isSuperAdmin();
     }
 
+    /* Subcollection: neighborhood posts (for collectionGroup queries) */
+    match /neighborhoods/{neighborhoodId}/posts/{postId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth();
+    }
+
     /* ================================================================== */
     /*  User tokens (FCM push)                                              */
     /* ================================================================== */

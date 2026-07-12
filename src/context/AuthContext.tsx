@@ -1,10 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   User as FirebaseUser,
+  GoogleAuthProvider,
+  signInWithCredential,
 } from 'firebase/auth';
 import {
   doc,
@@ -16,6 +18,8 @@ import {
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus, Alert } from 'react-native';
+import Constants from 'expo-constants';
+import * as Google from 'expo-auth-session/providers/google';
 import { auth, db, storage } from '../services/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -156,6 +160,52 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Google Sign-In configuration
+  const extra = Constants.expoConfig?.extra as Record<string, string> | undefined;
+  const googleWebClientId = extra?.googleWebClientId || '';
+  const googleResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const [googleRequest, googleResponse, googlePromptAsync] = Google.useAuthRequest({
+    clientId: googleWebClientId || undefined,
+    scopes: ['openid', 'profile', 'email'],
+  });
+
+  // Handle Google Sign-In response
+  useEffect(() => {
+    if (!googleResponse) return;
+    (async () => {
+      try {
+        if (googleResponse.type === 'success') {
+          const { id_token } = googleResponse.params;
+          if (id_token) {
+            const credential = GoogleAuthProvider.credential(id_token);
+            await signInWithCredential(auth, credential);
+            // onAuthStateChanged handles profile setup automatically
+            if (googleResolveRef.current) {
+              // Check if user needs to complete address setup
+              const snap = auth.currentUser
+                ? await getDoc(doc(db, 'users', auth.currentUser.uid))
+                : null;
+              const isNew = !snap?.exists() || !snap.data()?.address;
+              googleResolveRef.current(isNew);
+              googleResolveRef.current = null;
+            }
+          }
+        } else {
+          if (googleResolveRef.current) {
+            googleResolveRef.current(false);
+            googleResolveRef.current = null;
+          }
+        }
+      } catch (err) {
+        console.error('[Auth] Google Sign-In error:', err);
+        if (googleResolveRef.current) {
+          googleResolveRef.current(false);
+          googleResolveRef.current = null;
+        }
+      }
+    })();
+  }, [googleResponse]);
+
   /** Persist user to AsyncStorage so session survives app restart. */
   const persistUser = async (u: UserData | null) => {
     try {
@@ -195,7 +245,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (fireUser) {
         try {
           const profileRef = doc(db, 'users', fireUser.uid);
-          
+
+          // Check if profile exists — if not, auto-create it
+          const profileSnapshot = await getDoc(profileRef);
+          if (!profileSnapshot.exists() && !cancelled) {
+            const newProfile = buildUserData(fireUser, undefined);
+            await setDoc(profileRef, {
+              ...newProfile,
+              nameLowercase: newProfile.name.toLowerCase(),
+              blockedUsers: [],
+              createdAt: Date.now(),
+              lastSeen: Date.now(),
+            });
+          }
+
           // Setup real-time listener on user profile
           unsubProfile = onSnapshot(profileRef, (snapshot) => {
             if (cancelled) return;
@@ -214,8 +277,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           });
 
           // Update online status + lastSeen (fire-and-forget)
-          const snapshot = await getDoc(profileRef);
-          if (snapshot.exists() && !cancelled) {
+          if (!cancelled) {
             updateDoc(profileRef, { onlineStatus: true, lastSeen: Date.now() }).catch(() => {});
           }
         } catch (err) {
@@ -261,6 +323,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const loginWithGoogle = async (): Promise<boolean> => {
+    // If Google Web Client ID is configured, use real Google Sign-In
+    if (googleWebClientId) {
+      return new Promise<boolean>((resolve) => {
+        googleResolveRef.current = resolve;
+        googlePromptAsync().catch(() => {
+          googleResolveRef.current = null;
+          resolve(false);
+        });
+      });
+    }
+
+    // Fallback to mock accounts when no Google client ID is configured
     return new Promise<boolean>((resolve, reject) => {
       Alert.alert(
         'Continue with Google',

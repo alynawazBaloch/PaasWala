@@ -76,6 +76,7 @@
       "googleMapsApiKey": "$GOOGLE_MAPS_API_KEY",
       "brevoApiKey": "$BREVO_API_KEY",
       "brevoApiKeyExpoPublic": "$EXPO_PUBLIC_BREVO_API_KEY",
+      "googleWebClientId": "$GOOGLE_WEB_CLIENT_ID",
       "eas": {
         "projectId": "e12c748b-9391-46b5-9ef5-87d689c0315d"
       }

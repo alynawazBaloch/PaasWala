@@ -288,7 +288,7 @@ const ConversationScreen: React.FC<{ navigation: any; route: any }> = ({ navigat
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Permission needed', 'Allow access to gallery to send videos.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      mediaTypes: ['videos'],
       quality: 0.7,
       allowsEditing: false,
     });
