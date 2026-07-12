@@ -9,28 +9,46 @@ service cloud.firestore {
     function isAuth() { return request.auth != null; }
     function isOwner(uid) { return request.auth.uid == uid; }
     function getUser() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let doc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return doc != null ? doc.data : null;
     }
     function getUserData(uid) {
-      return get(/databases/$(database)/documents/users/$(uid)).data;
+      let doc = get(/databases/$(database)/documents/users/$(uid));
+      return doc != null ? doc.data : null;
     }
-    function getUserRole(uid) { return getUserData(uid).role; }
-    function isVerified() { return getUser().verified == true; }
+    function isVerified() {
+      let u = getUser();
+      return u != null && u.verified == true;
+    }
     function isAdmin() {
-      let role = getUser().role;
+      let u = getUser();
+      let role = u != null ? u.role : null;
       return role == 'admin' || role == 'superAdmin';
     }
-    function isSuperAdmin() { return getUser().role == 'superAdmin'; }
-    function isBusinessOwner() { return getUser().role == 'business'; }
-
-    function isNotBlockedByMe(targetUid) {
-      let myBlocked = getUser().blockedUsers;
-      let theirBlocked = getUserData(targetUid).blockedUsers;
-      return !(myBlocked != null && targetUid in myBlocked)
-          && !(theirBlocked != null && request.auth.uid in theirBlocked);
+    function isSuperAdmin() {
+      let u = getUser();
+      let role = u != null ? u.role : null;
+      return role == 'superAdmin';
+    }
+    function isBusinessOwner() {
+      let u = getUser();
+      let role = u != null ? u.role : null;
+      return role == 'business';
     }
 
-    function isNeighbor(nId) { return getUser().neighborhoodId == nId; }
+    function isNotBlockedByMe(targetUid) {
+      let myData = getUser();
+      let theirData = getUserData(targetUid);
+      let myBlocked = myData != null ? myData.blockedUsers : null;
+      let theirBlocked = theirData != null ? theirData.blockedUsers : null;
+      return (myBlocked == null || !(targetUid in myBlocked))
+          && (theirBlocked == null || !(request.auth.uid in theirBlocked));
+    }
+
+    function isNeighbor(nId) {
+      let u = getUser();
+      return u != null && u.neighborhoodId == nId;
+    }
     function isVerifiedResident(nId) { return isVerified() && isNeighbor(nId); }
 
     /* ================================================================== */
@@ -267,7 +285,7 @@ service cloud.firestore {
     }
 
     /* Subcollection: neighborhood posts (for collectionGroup queries) */
-    match /neighborhoods/{neighborhoodId}/posts/{postId} {
+    match /{path=**}/posts/{postId} {
       allow read: if isAuth();
       allow create: if isAuth();
       allow update: if isAuth();

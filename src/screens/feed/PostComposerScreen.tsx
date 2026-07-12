@@ -95,7 +95,14 @@ const PostComposerScreen: React.FC<{ navigation?: any; route?: any }> = ({
       audience,
     };
 
-    await savePost(postObj);
+    try {
+      await savePost(postObj);
+    } catch (err) {
+      console.error('[PostComposer] savePost failed:', err);
+      Alert.alert('Error', 'Failed to create post. Please try again.');
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(false);
     navigation?.goBack();
   }, [isValid, isSubmitting, content, selectedCategory, audience, navigation, user, mediaAttachments, locationTag]);
