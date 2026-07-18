@@ -83,9 +83,7 @@
       }
     },
     "owner": "alynawazz",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/e12c748b-9391-46b5-9ef5-87d689c0315d",
       "enabled": false,
